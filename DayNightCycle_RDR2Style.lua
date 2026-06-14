@@ -4,11 +4,12 @@
 	Whitelisted :time command for d2here4game
 	
 	Key features:
-	- NO FOG (clear visibility)
+	- RDR2-STYLE ATMOSPHERIC FOG (volumetric, distant haze)
 	- Realistic RDR2-inspired lighting
 	- Warm dawn/dusk tones
 	- Cool night atmosphere
 	- Neutral midday lighting
+	- Dynamic fog that changes with time of day
 ]]
 
 local Lighting = game:GetService("Lighting")
@@ -22,10 +23,6 @@ local WHITELISTED_USERS = { "d2here4game" }
 -- In-game hours per real second: 24 hours / (20*60 seconds) = 0.02 hours/sec
 local HOURS_PER_SECOND = 24 / (FULL_CYCLE_MINUTES * 60)
 
--- Remove fog completely
-Lighting.FogEnd = math.huge
-Lighting.FogColor = Color3.fromRGB(200, 200, 200) -- irrelevant but set anyway
-
 -- Ensure atmosphere exists
 local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
 if not atmosphere then
@@ -34,11 +31,12 @@ if not atmosphere then
 end
 
 ---------------------------------------------------------------
--- RDR2 LIGHTING PRESETS
+-- RDR2 LIGHTING PRESETS WITH ATMOSPHERIC FOG
 -- Based on Red Dead Redemption 2 realistic color grading
+-- Fog simulates RDR2's volumetric atmospheric haze
 ---------------------------------------------------------------
 
--- Early Dawn (5:00-6:00) - Dark blue transitioning to orange
+-- Early Dawn (5:00-6:00) - Dark blue transitioning to orange with misty fog
 local DAWN = {
 	Ambient = Color3.fromRGB(80, 100, 140),
 	Brightness = 0.4,
@@ -50,10 +48,12 @@ local DAWN = {
 	ShadowSoftness = 0.5,
 	GlobalShadows = true,
 	AtmosphereDensity = 0.4,
+	FogColor = Color3.fromRGB(140, 140, 160),
+	FogEnd = 2500,
 	ClockTime = 5,
 }
 
--- Sunrise (6:00-7:00) - Golden orange warm light
+-- Sunrise (6:00-7:00) - Golden orange warm light with golden haze
 local SUNRISE = {
 	Ambient = Color3.fromRGB(180, 150, 110),
 	Brightness = 1.2,
@@ -65,10 +65,12 @@ local SUNRISE = {
 	ShadowSoftness = 0.4,
 	GlobalShadows = true,
 	AtmosphereDensity = 0.35,
+	FogColor = Color3.fromRGB(200, 160, 110),
+	FogEnd = 3500,
 	ClockTime = 6,
 }
 
--- Morning (7:00-10:00) - Warm daylight
+-- Morning (7:00-10:00) - Warm daylight with light haze
 local MORNING = {
 	Ambient = Color3.fromRGB(200, 190, 170),
 	Brightness = 2.0,
@@ -80,10 +82,12 @@ local MORNING = {
 	ShadowSoftness = 0.2,
 	GlobalShadows = true,
 	AtmosphereDensity = 0.25,
+	FogColor = Color3.fromRGB(200, 195, 180),
+	FogEnd = 5500,
 	ClockTime = 8,
 }
 
--- Midday (10:00-14:00) - Bright neutral daylight
+-- Midday (10:00-14:00) - Bright neutral daylight with far haze
 local MIDDAY = {
 	Ambient = Color3.fromRGB(220, 220, 210),
 	Brightness = 2.5,
@@ -95,10 +99,12 @@ local MIDDAY = {
 	ShadowSoftness = 0.15,
 	GlobalShadows = true,
 	AtmosphereDensity = 0.2,
+	FogColor = Color3.fromRGB(210, 210, 210),
+	FogEnd = 8000,
 	ClockTime = 12,
 }
 
--- Afternoon (14:00-17:00) - Warm golden light
+-- Afternoon (14:00-17:00) - Warm golden light with golden haze
 local AFTERNOON = {
 	Ambient = Color3.fromRGB(210, 200, 170),
 	Brightness = 2.0,
@@ -110,10 +116,12 @@ local AFTERNOON = {
 	ShadowSoftness = 0.3,
 	GlobalShadows = true,
 	AtmosphereDensity = 0.28,
+	FogColor = Color3.fromRGB(210, 190, 160),
+	FogEnd = 6500,
 	ClockTime = 15,
 }
 
--- Sunset (17:00-18:30) - Deep orange/red sky
+-- Sunset (17:00-18:30) - Deep orange/red sky with orange atmospheric fog
 local SUNSET = {
 	Ambient = Color3.fromRGB(180, 120, 80),
 	Brightness = 1.4,
@@ -125,10 +133,12 @@ local SUNSET = {
 	ShadowSoftness = 0.45,
 	GlobalShadows = true,
 	AtmosphereDensity = 0.38,
+	FogColor = Color3.fromRGB(200, 120, 60),
+	FogEnd = 4000,
 	ClockTime = 17.5,
 }
 
--- Dusk (18:30-20:00) - Dark blue transitioning to night
+-- Dusk (18:30-20:00) - Dark blue transitioning to night with purple fog
 local DUSK = {
 	Ambient = Color3.fromRGB(70, 90, 130),
 	Brightness = 0.3,
@@ -140,10 +150,12 @@ local DUSK = {
 	ShadowSoftness = 0.6,
 	GlobalShadows = true,
 	AtmosphereDensity = 0.45,
+	FogColor = Color3.fromRGB(90, 90, 130),
+	FogEnd = 2000,
 	ClockTime = 19,
 }
 
--- Night (20:00-5:00) - Deep blue/purple night sky
+-- Night (20:00-5:00) - Deep blue/purple night sky with moody fog
 local NIGHT = {
 	Ambient = Color3.fromRGB(30, 40, 70),
 	Brightness = 0.05,
@@ -155,6 +167,8 @@ local NIGHT = {
 	ShadowSoftness = 0.8,
 	GlobalShadows = true,
 	AtmosphereDensity = 0.5,
+	FogColor = Color3.fromRGB(40, 45, 80),
+	FogEnd = 1500,
 	ClockTime = 22,
 }
 
@@ -184,8 +198,9 @@ local function applyPreset(preset)
 	Lighting.ShadowSoftness = preset.ShadowSoftness
 	Lighting.GlobalShadows = preset.GlobalShadows
 	atmosphere.Density = preset.AtmosphereDensity
-	-- NO FOG - keep clear visibility
-	Lighting.FogEnd = math.huge
+	-- RDR2-style fog
+	Lighting.FogColor = preset.FogColor
+	Lighting.FogEnd = preset.FogEnd
 end
 
 local function lerpPreset(from, to, t)
@@ -199,8 +214,9 @@ local function lerpPreset(from, to, t)
 	Lighting.OutdoorAmbient = lerpColor(from.OutdoorAmbient, to.OutdoorAmbient, t)
 	Lighting.ShadowSoftness = lerpNum(from.ShadowSoftness, to.ShadowSoftness, t)
 	atmosphere.Density = lerpNum(from.AtmosphereDensity, to.AtmosphereDensity, t)
-	-- NO FOG - keep clear visibility
-	Lighting.FogEnd = math.huge
+	-- RDR2-style fog
+	Lighting.FogColor = lerpColor(from.FogColor, to.FogColor, t)
+	Lighting.FogEnd = lerpNum(from.FogEnd, to.FogEnd, t)
 
 	-- Snap GlobalShadows at midpoint
 	if t < 0.5 then
