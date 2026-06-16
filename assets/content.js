@@ -359,6 +359,44 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
   `
 },
 
+/* ----------------------- SCRIPT LIBRARY ----------------------- */
+'/scripts': {
+  section: 'scripts', title: 'Browse Scripts',
+  html: () => `
+    <span class="eyebrow">SCRIPT LIBRARY · FREE TO USE</span>
+    <h1>Script Library</h1>
+    <p class="lead">A shelf of ready-to-use scripts. Each one says what it is and what it does — filter, read, copy, or download the raw file. No setup walls.</p>
+
+    <div class="lib-controls">
+      <input id="lib-search" class="lib-search" placeholder="🔎  search scripts, tags…" autocomplete="off" />
+      <div class="lib-filters" id="lib-filters"></div>
+    </div>
+
+    <div class="lib-grid" id="script-grid"></div>
+
+    <div class="callout info"><span class="ico">📦</span><p>Every script is a real file under <code class="inline-code">/scripts</code>. <strong>Download</strong> grabs the file directly; <strong>Copy</strong> puts it on your clipboard. Drop it into a server <code class="inline-code">Script</code> and it runs.</p></div>
+  `
+},
+
+'/avatars': {
+  section: 'scripts', title: 'Avatar Vault',
+  html: () => `
+    <span class="eyebrow">SCRIPT LIBRARY · LIVE DATA</span>
+    <h1>Avatar Vault</h1>
+    <p class="lead">The other end of the <a class="inline" href="#/scripts" data-link>Avatar Collector</a>. As players join your game, their avatars, worn items and join dates land here in real time.</p>
+
+    <div class="vault-head">
+      <span class="dot" id="vault-dot"></span>
+      <span id="vault-status">connecting…</span>
+      <button class="console-clear" id="vault-clear">Clear vault</button>
+    </div>
+
+    <div class="vault-grid" id="avatar-grid"></div>
+
+    <div class="callout warn"><span class="ico">🧪</span><p>Prototype storage is in-memory (resets when the server restarts). Paste the <strong>Avatar Collector</strong> script into your game and join to populate it.</p></div>
+  `
+},
+
 /* ----------------------- QUANTUM LAB ----------------------- */
 '/quantum': {
   section: 'quantum', title: 'The Lab',

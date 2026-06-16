@@ -101,6 +101,127 @@
 
     wireConverter();
     wireConsole();
+    wireScriptLibrary();
+    wireAvatarVault();
+  }
+
+  /* ---------- SCRIPT LIBRARY ---------- */
+  const codeCache = {};
+  async function loadScript(file) {
+    if (codeCache[file]) return codeCache[file];
+    try {
+      const r = await fetch(file, { cache: 'no-store' });
+      const t = await r.text();
+      codeCache[file] = t;
+      return t;
+    } catch (e) { return '-- could not load ' + file; }
+  }
+
+  function wireScriptLibrary() {
+    const grid = $('#script-grid');
+    if (!grid || typeof SCRIPTS === 'undefined') return;
+    const filterBar = $('#lib-filters');
+    const search = $('#lib-search');
+
+    const cats = ['All', ...[...new Set(SCRIPTS.map(s => s.category))]];
+    let activeCat = 'All';
+
+    filterBar.innerHTML = cats.map((c, i) =>
+      `<button class="lib-chip${i === 0 ? ' active' : ''}" data-cat="${c}">${c}</button>`).join('');
+
+    const render = () => {
+      const q = (search.value || '').toLowerCase();
+      const items = SCRIPTS.filter(s => {
+        const inCat = activeCat === 'All' || s.category === activeCat;
+        const hay = (s.title + ' ' + s.what + ' ' + s.does + ' ' + s.tags.join(' ')).toLowerCase();
+        return inCat && (!q || hay.includes(q));
+      });
+      grid.innerHTML = items.length ? items.map(s => `
+        <div class="lib-card" data-id="${s.id}">
+          <div class="lib-card-top">
+            <span class="lib-cat">${s.category}</span>
+            <span class="lib-lang">${s.lang}</span>
+          </div>
+          <h3>${s.title}</h3>
+          <p class="lib-what">${escapeHtml(s.what)}</p>
+          <p class="lib-does">${escapeHtml(s.does)}</p>
+          <div class="lib-tags">${s.tags.map(t => `<span>#${t}</span>`).join('')}</div>
+          <div class="lib-actions">
+            <button class="lib-view" data-file="${s.file}">View code</button>
+            <button class="lib-copy" data-file="${s.file}">Copy</button>
+            <a class="lib-dl" href="${s.file}" download>Download</a>
+          </div>
+          <div class="lib-code" hidden><div class="code"><div class="code-head"><span class="code-lang">${s.lang}</span></div><pre><code></code></pre></div></div>
+        </div>`).join('') : `<div class="lib-empty">No scripts match that.</div>`;
+
+      // view toggles (lazy-load file content)
+      $$('.lib-view', grid).forEach(b => b.addEventListener('click', async () => {
+        const card = b.closest('.lib-card');
+        const box = $('.lib-code', card);
+        if (!box.hidden) { box.hidden = true; b.textContent = 'View code'; return; }
+        const codeEl = $('code', box);
+        codeEl.textContent = 'loading…';
+        box.hidden = false; b.textContent = 'Hide code';
+        codeEl.textContent = await loadScript(b.dataset.file);
+      }));
+      // copy file content
+      $$('.lib-copy', grid).forEach(b => b.addEventListener('click', async () => {
+        const txt = await loadScript(b.dataset.file);
+        navigator.clipboard.writeText(txt);
+        b.textContent = 'Copied!'; setTimeout(() => b.textContent = 'Copy', 1300);
+      }));
+    };
+
+    $$('.lib-chip', filterBar).forEach(c => c.addEventListener('click', () => {
+      $$('.lib-chip', filterBar).forEach(x => x.classList.remove('active'));
+      c.classList.add('active'); activeCat = c.dataset.cat; render();
+    }));
+    search.addEventListener('input', render);
+    render();
+  }
+
+  /* ---------- AVATAR VAULT ---------- */
+  let vaultTimer = null;
+  function wireAvatarVault() {
+    if (vaultTimer) { clearInterval(vaultTimer); vaultTimer = null; }
+    const grid = $('#avatar-grid');
+    if (!grid) return;
+    const status = $('#vault-status'), dot = $('#vault-dot');
+    let lastKey = '';
+
+    const card = m => {
+      const d = m.data || {};
+      const items = (d.items || []).map(it => `<span class="av-item">${escapeHtml(it.kind)}:${it.id}</span>`).join('') || '<span class="av-none">no items read</span>';
+      const when = d.joined ? new Date(d.joined).toLocaleString() : new Date(m.ts).toLocaleString();
+      const img = d.thumb ? `<img src="${escapeHtml(d.thumb)}" alt="" loading="lazy" onerror="this.style.display='none'"/>` : '';
+      return `<div class="av-card">
+        <div class="av-head">${img}<div><div class="av-name">${escapeHtml(d.name || '?')}</div><div class="av-sub">${escapeHtml(d.displayName || '')} · id ${escapeHtml(String(d.userId || '—'))}</div></div></div>
+        <div class="av-when">🕒 ${when}</div>
+        <div class="av-items">${items}</div>
+      </div>`;
+    };
+
+    const tick = async () => {
+      try {
+        const r = await fetch('/api/messages?room=avatars', { cache: 'no-store' });
+        const list = await r.json();
+        dot.className = 'dot on'; status.textContent = `live · ${list.length} avatars`;
+        const key = list.map(m => (m.data && m.data.userId) + ':' + m.ts).join('|');
+        if (key !== lastKey) {
+          grid.innerHTML = list.length ? list.slice().reverse().map(card).join('')
+            : '<div class="lib-empty">No avatars yet — run the Avatar Collector and join the game.</div>';
+          lastKey = key;
+        }
+      } catch (e) { dot.className = 'dot off'; status.textContent = 'offline — start the server'; }
+    };
+
+    $('#vault-clear').addEventListener('click', async () => {
+      try { await fetch('/api/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ room: 'avatars' }) }); } catch (_) {}
+      lastKey = ''; tick();
+    });
+
+    tick();
+    vaultTimer = setInterval(tick, 2000);
   }
 
   /* ---------- WONDERSCRIPT CONVERTER ---------- */
