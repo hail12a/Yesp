@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Yesp Docs — Battlefeuer & Quantum Experiments</title>
+  <meta name="description" content="A docs-style hub: a full guide to the Roblox game Battlefeuer S2, plus a lab of revolutionary, boundary-pushing quantum-inspired code." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23d97757'/%3E%3Ctext x='16' y='22' font-size='18' text-anchor='middle' fill='white' font-family='monospace' font-weight='bold'%3EY%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <!-- ===================== TOP BAR ===================== -->
+  <header class="topbar">
+    <button class="icon-btn menu-toggle" id="menuToggle" aria-label="Toggle menu">
+      <svg viewBox="0 0 24 24" width="20" height="20"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+
+    <a class="brand" href="#/overview" data-link>
+      <span class="brand-mark">Y</span>
+      <span class="brand-name">Yesp <span class="brand-sub">Docs</span></span>
+    </a>
+
+    <nav class="top-nav">
+      <a href="#/overview" data-link data-section="overview">Overview</a>
+      <a href="#/battlefeuer" data-link data-section="battlefeuer">Battlefeuer</a>
+      <a href="#/quantum" data-link data-section="quantum">Quantum Lab</a>
+    </nav>
+
+    <div class="top-actions">
+      <button class="search-trigger" id="searchTrigger">
+        <svg viewBox="0 0 24 24" width="16" height="16"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="M21 21l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>Search</span>
+        <kbd>/</kbd>
+      </button>
+      <button class="icon-btn" id="themeToggle" aria-label="Toggle theme">
+        <svg class="sun" viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="2" fill="none"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <svg class="moon" viewBox="0 0 24 24" width="18" height="18"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 109.8 9.8z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/></svg>
+      </button>
+      <a class="play-btn" href="https://www.roblox.com/games/112971188400049/Battlefeuer-S2-FFS-B39-11" target="_blank" rel="noopener">Play ▸</a>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- ===================== SIDEBAR ===================== -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-inner">
+        <!-- Overview group -->
+        <div class="nav-group" data-group="overview">
+          <p class="nav-group-title">Getting Started</p>
+          <a href="#/overview" data-link>Overview</a>
+          <a href="#/overview-howto" data-link>How this hub works</a>
+        </div>
+
+        <!-- Battlefeuer group -->
+        <div class="nav-group" data-group="battlefeuer">
+          <p class="nav-group-title">Battlefeuer S2</p>
+          <a href="#/battlefeuer" data-link>Game Overview</a>
+          <a href="#/bf-getstarted" data-link>Get Started</a>
+          <a href="#/bf-loadout" data-link>Loadouts & Weapons</a>
+          <a href="#/bf-maps" data-link>Maps & Modes</a>
+          <a href="#/bf-tips" data-link>Pro Tips</a>
+        </div>
+
+        <!-- Quantum group -->
+        <div class="nav-group" data-group="quantum">
+          <p class="nav-group-title">Quantum Lab</p>
+          <a href="#/quantum" data-link>The Lab</a>
+          <a href="#/q-superposition" data-link>Exp 01 · Superposition Engine</a>
+          <a href="#/q-entangle" data-link>Exp 02 · Entangled Variables</a>
+          <a href="#/q-walk" data-link>Exp 03 · Quantum Walk Search</a>
+          <a href="#/q-anneal" data-link>Exp 04 · Reality Annealer</a>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ===================== MAIN ===================== -->
+    <main class="content" id="content"><!-- routed --></main>
+
+    <!-- ===================== ON-THIS-PAGE ===================== -->
+    <aside class="toc" id="toc"></aside>
+  </div>
+
+  <!-- ===================== SEARCH MODAL ===================== -->
+  <div class="search-modal" id="searchModal" hidden>
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="Search the docs…" autocomplete="off" />
+      <div class="search-results" id="searchResults"></div>
+      <div class="search-foot"><kbd>esc</kbd> to close · <kbd>↵</kbd> to open</div>
+    </div>
+  </div>
+
+  <script src="assets/content.js"></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>
