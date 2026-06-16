@@ -10,7 +10,11 @@ const path  = require("path");
 
 const PORT   = process.env.SERVER_PORT || process.env.PORT || 8080;
 const REPO   = process.env.REPO   || "hail12a/Yesp";
-const BRANCH = process.env.BRANCH || "claude/festive-faraday-b4ljrz";
+// Branches to try, in order. The panel may set BRANCH=master (which doesn't
+// exist), so we always fall back to the real branch automatically.
+const BRANCHES = [process.env.BRANCH, "claude/festive-faraday-b4ljrz", "main", "master"]
+  .filter(Boolean)
+  .filter((b, i, a) => a.indexOf(b) === i);
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -42,32 +46,40 @@ function get(url, headers = {}) {
   });
 }
 
-/* ---- pull every file in the branch from GitHub ---- */
-async function selfUpdate() {
-  // skip these so the updater never fights the running process / git
-  const SKIP = new Set([".git"]);
-  try {
-    console.log(`[updater] checking ${REPO}@${BRANCH} for updates…`);
-    const branch = JSON.parse(await get(`https://api.github.com/repos/${REPO}/branches/${BRANCH}`));
-    const treeSha = branch.commit.commit.tree.sha;
-    const tree = JSON.parse(await get(`https://api.github.com/repos/${REPO}/git/trees/${treeSha}?recursive=1`));
+/* ---- pull every file from the first branch that exists ---- */
+async function updateFromBranch(branch) {
+  const SKIP = [".git"]; // never overwrite git internals
+  const meta = JSON.parse(await get(`https://api.github.com/repos/${REPO}/branches/${branch}`));
+  const treeSha = meta.commit.commit.tree.sha;
+  const tree = JSON.parse(await get(`https://api.github.com/repos/${REPO}/git/trees/${treeSha}?recursive=1`));
 
-    let count = 0;
-    for (const entry of tree.tree) {
-      if (entry.type !== "blob") continue;
-      if ([...SKIP].some(s => entry.path.startsWith(s))) continue;
+  let count = 0;
+  for (const entry of tree.tree) {
+    if (entry.type !== "blob") continue;
+    if (SKIP.some(s => entry.path.startsWith(s))) continue;
 
-      const raw = `https://raw.githubusercontent.com/${REPO}/${encodeURI(BRANCH)}/${entry.path.split("/").map(encodeURIComponent).join("/")}`;
-      const data = await get(raw);
-      const dest = path.join(__dirname, entry.path);
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.writeFileSync(dest, data);
-      count++;
-    }
-    console.log(`[updater] updated ${count} files ✔`);
-  } catch (e) {
-    console.log(`[updater] skipped (using local files): ${e.message}`);
+    const raw = `https://raw.githubusercontent.com/${REPO}/${encodeURI(branch)}/${entry.path.split("/").map(encodeURIComponent).join("/")}`;
+    const data = await get(raw);
+    const dest = path.join(__dirname, entry.path);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, data);
+    count++;
   }
+  return count;
+}
+
+async function selfUpdate() {
+  for (const branch of BRANCHES) {
+    try {
+      console.log(`[updater] checking ${REPO}@${branch} …`);
+      const count = await updateFromBranch(branch);
+      console.log(`[updater] updated ${count} files from ${branch} ✔`);
+      return; // first branch that works wins
+    } catch (e) {
+      console.log(`[updater] ${branch} unavailable (${e.message}), trying next…`);
+    }
+  }
+  console.log("[updater] no branch reachable — serving local files.");
 }
 
 /* ---- static file server ---- */
