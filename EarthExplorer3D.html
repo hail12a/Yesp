@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Earth Explorer 3D — Walk on Earth</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; font-family: 'Segoe UI', Arial, sans-serif; }
+canvas { display: block; }
+
+#loading {
+  position: fixed; inset: 0; background: #000;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: #fff; z-index: 300;
+}
+#loading h1 { font-size: 2.5em; letter-spacing: 4px; margin-bottom: 8px; color: #88ccff; }
+#loading p { opacity: 0.55; margin-bottom: 30px; font-size: 0.95em; }
+#bar-outer { width: 320px; height: 6px; background: #1a2a3a; border-radius: 3px; overflow: hidden; }
+#bar-fill { height: 100%; background: linear-gradient(90deg, #2255bb, #66aaff); width: 0%; transition: width 0.25s ease; }
+#bar-label { margin-top: 12px; font-size: 12px; opacity: 0.45; letter-spacing: 1px; }
+
+#overlay {
+  position: fixed; inset: 0; background: rgba(0,0,12,0.82);
+  display: none; flex-direction: column; align-items: center; justify-content: center;
+  color: #fff; z-index: 200; backdrop-filter: blur(4px);
+}
+#overlay h1 { font-size: 3.5em; letter-spacing: 6px; margin-bottom: 8px;
+  background: linear-gradient(135deg, #88ccff, #4488ff);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+#overlay .sub { opacity: 0.6; font-size: 1em; margin-bottom: 35px; letter-spacing: 2px; }
+#start-btn {
+  padding: 14px 50px; background: linear-gradient(135deg, #1a44aa, #3366dd);
+  border: 1px solid rgba(136,204,255,0.3); border-radius: 40px; color: #cce8ff;
+  font-size: 1.1em; letter-spacing: 2px; cursor: pointer;
+  box-shadow: 0 0 40px rgba(51,102,220,0.5); transition: all 0.2s;
+}
+#start-btn:hover { transform: scale(1.04); box-shadow: 0 0 60px rgba(51,102,220,0.8); }
+#keybinds { margin-top: 28px; font-size: 12px; opacity: 0.38; letter-spacing: 2px; }
+
+#crosshair {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  width: 22px; height: 22px; display: none; pointer-events: none;
+}
+#crosshair::before {
+  content: ''; position: absolute; width: 2px; height: 100%;
+  left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.65);
+  border-radius: 1px;
+}
+#crosshair::after {
+  content: ''; position: absolute; width: 100%; height: 2px;
+  top: 50%; transform: translateY(-50%); background: rgba(255,255,255,0.65);
+  border-radius: 1px;
+}
+
+#hud {
+  position: fixed; top: 16px; right: 16px; display: none;
+  background: rgba(0,8,20,0.72); border: 1px solid rgba(100,180,255,0.12);
+  color: #88bbdd; padding: 14px 18px; border-radius: 10px;
+  font-family: 'Courier New', monospace; font-size: 12px; line-height: 2;
+  backdrop-filter: blur(6px);
+}
+#hud .label { color: #446688; }
+
+#hint {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: none;
+  background: rgba(0,8,20,0.65); color: rgba(255,255,255,0.45);
+  padding: 8px 22px; border-radius: 20px; font-size: 12px; letter-spacing: 1px;
+  border: 1px solid rgba(255,255,255,0.07); backdrop-filter: blur(4px);
+}
+
+#paused {
+  position: fixed; inset: 0; background: rgba(0,0,10,0.7);
+  display: none; align-items: center; justify-content: center;
+  color: #88aacc; font-size: 1.8em; letter-spacing: 4px; z-index: 150;
+  cursor: pointer; backdrop-filter: blur(3px);
+}
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <h1>🌍 EARTH</h1>
+  <p>GENERATING PROCEDURAL PLANET</p>
+  <div id="bar-outer"><div id="bar-fill"></div></div>
+  <div id="bar-label" id="bar-label">BUILDING TERRAIN...</div>
+</div>
+
+<div id="overlay">
+  <h1>EARTH</h1>
+  <div class="sub">FIRST PERSON EXPLORER</div>
+  <button id="start-btn">▶ BEGIN EXPLORATION</button>
+  <div id="keybinds">WASD · MOUSE LOOK · SPACE = JUMP · SHIFT = RUN · ESC = PAUSE</div>
+</div>
+
+<div id="crosshair"></div>
+
+<div id="hud">
+  <div><span class="label">LAT  </span><span id="h-lat">0.0000°</span></div>
+  <div><span class="label">LON  </span><span id="h-lon">0.0000°</span></div>
+  <div><span class="label">ALT  </span><span id="h-alt">0 m</span></div>
+  <div><span class="label">MODE </span><span id="h-spd">WALKING</span></div>
+</div>
+
+<div id="hint">W A S D — MOVE &nbsp;|&nbsp; MOUSE — LOOK &nbsp;|&nbsp; SPACE — JUMP &nbsp;|&nbsp; SHIFT — RUN</div>
+<div id="paused">⏸ &nbsp; PAUSED — CLICK TO RESUME</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+
+// ══════════════════════════════════════════════════
+// NOISE
+// ══════════════════════════════════════════════════
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function hash2(x, y) {
+  let h = (Math.imul(x, 1664525) + Math.imul(y, 1013904223)) | 0;
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x45d9f3b) | 0;
+  h ^= h >>> 16;
+  return (h >>> 0) / 0x100000000;
+}
+
+function noise2(x, y) {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  const fx = x - ix, fy = y - iy;
+  const ux = fx * fx * (3 - 2 * fx);
+  const uy = fy * fy * (3 - 2 * fy);
+  return lerp(
+    lerp(hash2(ix, iy),   hash2(ix + 1, iy),   ux),
+    lerp(hash2(ix, iy+1), hash2(ix + 1, iy+1), ux),
+    uy
+  );
+}
+
+function fbm(x, y, oct, lac, gain) {
+  lac  = lac  || 2.0;
+  gain = gain || 0.5;
+  let v = 0, amp = 0.5, freq = 1, norm = 0;
+  for (let i = 0; i < oct; i++) {
+    v    += amp * noise2(x * freq, y * freq);
+    norm += amp;
+    amp  *= gain;
+    freq *= lac;
+  }
+  return v / norm;
+}
+
+// ══════════════════════════════════════════════════
+// TERRAIN
+// ══════════════════════════════════════════════════
+const PI2 = Math.PI * 2;
+
+function terrainNoise(la, lo) {
+  const u = (lo + Math.PI) / PI2;
+  const v = (la + Math.PI * 0.5) / Math.PI;
+  const continent = fbm(u * 4 + 7.3, v * 2 + 5.1, 5, 2, 0.55);
+  const detail    = fbm(u * 14 + 33, v * 7 + 22,  6, 2, 0.48);
+  return continent * 0.68 + detail * 0.32;
+}
+
+function terrainDisp(la, lo) {
+  const h = terrainNoise(la, lo);
+  return Math.max(0, (h - 0.48) / 0.52) * DISP_SCALE;
+}
+
+function terrainColor(h, la) {
+  const pole = Math.max(0, (Math.abs(la) - 1.18) / 0.39);
+  let r, g, b;
+  if      (h < 0.40) { const t=(h/0.40);            r=lerp(5,15,t);   g=lerp(12,50,t);  b=lerp(55,130,t); }
+  else if (h < 0.47) { const t=(h-0.40)/0.07;       r=lerp(15,35,t);  g=lerp(50,100,t); b=lerp(130,175,t);}
+  else if (h < 0.50) { const t=(h-0.47)/0.03;       r=lerp(35,195,t); g=lerp(100,175,t);b=lerp(175,120,t);}
+  else if (h < 0.57) { const t=(h-0.50)/0.07;       r=lerp(90,65,t);  g=lerp(150,120,t);b=lerp(60,45,t);  }
+  else if (h < 0.68) { const t=(h-0.57)/0.11;       r=lerp(55,75,t);  g=lerp(105,88,t); b=lerp(38,55,t);  }
+  else if (h < 0.80) { const t=(h-0.68)/0.12;       r=lerp(95,138,t); g=lerp(85,125,t); b=lerp(68,115,t); }
+  else               { const t=Math.min(1,(h-0.80)/0.12); r=lerp(175,252,t); g=lerp(175,252,t); b=lerp(195,255,t); }
+  if (pole > 0) { r=lerp(r,228,pole); g=lerp(g,238,pole); b=lerp(b,255,pole); }
+  return [r|0, g|0, b|0];
+}
+
+// ══════════════════════════════════════════════════
+// THREE.JS SETUP
+// ══════════════════════════════════════════════════
+const scene    = new THREE.Scene();
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.00005, 60000);
+
+const EARTH_R   = 637.1;
+const DISP_SCALE = 1.8;
+const EYE_H     = 0.0016;
+
+// ══════════════════════════════════════════════════
+// STATIC SCENE OBJECTS
+// ══════════════════════════════════════════════════
+// Stars
+const sPts = new Float32Array(18000 * 3);
+for (let i = 0; i < sPts.length; i++) sPts[i] = (Math.random() - 0.5) * 50000;
+const starGeo = new THREE.BufferGeometry();
+starGeo.setAttribute('position', new THREE.BufferAttribute(sPts, 3));
+scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.8, sizeAttenuation: true })));
+
+// Lighting — sun
+const SUN_POS  = new THREE.Vector3(6000, 2500, 4000);
+const sunLight = new THREE.DirectionalLight(0xfff5e0, 2.0);
+sunLight.position.copy(SUN_POS);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(1024, 1024);
+scene.add(sunLight);
+scene.add(new THREE.AmbientLight(0x192840, 0.7));
+
+// Sun sphere
+const sunMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(45, 16, 8),
+  new THREE.MeshBasicMaterial({ color: 0xfff088 })
+);
+sunMesh.position.copy(SUN_POS);
+scene.add(sunMesh);
+
+// ══════════════════════════════════════════════════
+// TEXTURE GENERATION (async, chunked)
+// ══════════════════════════════════════════════════
+let earthBuilt = false;
+let earthObj, cloudObj, groundPlane;
+
+const barFill  = document.getElementById('bar-fill');
+const barLabel = document.getElementById('bar-label');
+
+function setProgress(pct, label) {
+  barFill.style.width = pct + '%';
+  if (label) barLabel.textContent = label;
+}
+
+function genEarthTex(W, H, onProg, onDone) {
+  const cvs = document.createElement('canvas');
+  cvs.width = W; cvs.height = H;
+  const ctx = cvs.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  const d   = img.data;
+  let y = 0;
+  const CHUNK = 6;
+  function tick() {
+    const end = Math.min(y + CHUNK, H);
+    for (; y < end; y++) {
+      const la = Math.PI * 0.5 - (y / H) * Math.PI;
+      for (let x = 0; x < W; x++) {
+        const lo = (x / W) * PI2 - Math.PI;
+        const h  = terrainNoise(la, lo);
+        const [r, g, b] = terrainColor(h, la);
+        const i = (y * W + x) * 4;
+        d[i] = r; d[i+1] = g; d[i+2] = b; d[i+3] = 255;
+      }
+    }
+    onProg(y / H);
+    if (y < H) { setTimeout(tick, 0); }
+    else { ctx.putImageData(img, 0, 0); onDone(new THREE.CanvasTexture(cvs)); }
+  }
+  tick();
+}
+
+function genHeightTex(W, H, onDone) {
+  const cvs = document.createElement('canvas');
+  cvs.width = W; cvs.height = H;
+  const ctx = cvs.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  const d   = img.data;
+  let y = 0;
+  function tick() {
+    const end = Math.min(y + 12, H);
+    for (; y < end; y++) {
+      const la = Math.PI * 0.5 - (y / H) * Math.PI;
+      for (let x = 0; x < W; x++) {
+        const lo = (x / W) * PI2 - Math.PI;
+        const v  = Math.round(Math.max(0, Math.min(255, Math.max(0, (terrainNoise(la, lo) - 0.48) / 0.52) * 255)));
+        const i  = (y * W + x) * 4;
+        d[i] = d[i+1] = d[i+2] = v; d[i+3] = 255;
+      }
+    }
+    if (y < H) { setTimeout(tick, 0); }
+    else { ctx.putImageData(img, 0, 0); onDone(new THREE.CanvasTexture(cvs)); }
+  }
+  tick();
+}
+
+function genCloudTex(W, H) {
+  const cvs = document.createElement('canvas');
+  cvs.width = W; cvs.height = H;
+  const ctx = cvs.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  const d   = img.data;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const n = fbm(x / 90 + 3.7, y / 45 + 8.1, 5);
+      const a = n > 0.56 ? Math.min(255, (n - 0.56) * 1300) : 0;
+      const i = (y * W + x) * 4;
+      d[i] = d[i+1] = d[i+2] = 255; d[i+3] = a;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return new THREE.CanvasTexture(cvs);
+}
+
+function genGroundTex() {
+  const S = 512;
+  const cvs = document.createElement('canvas');
+  cvs.width = cvs.height = S;
+  const ctx = cvs.getContext('2d');
+  const img = ctx.createImageData(S, S);
+  const d   = img.data;
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const n  = fbm(x / 38, y / 38, 5);
+      const n2 = fbm(x / 12 + 9, y / 12 + 9, 3);
+      let r, g, b;
+      if (n > 0.62) { r = 45+n2*35; g = 95+n*65; b = 28+n2*18; }
+      else if (n > 0.53) { r = 140+n2*55; g = 118+n2*42; b = 72+n2*28; }
+      else { const v = 75+n*110; r=v+5; g=v; b=v-8; }
+      const i = (y * S + x) * 4;
+      d[i]=r|0; d[i+1]=g|0; d[i+2]=b|0; d[i+3]=255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(cvs);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(28, 28);
+  return t;
+}
+
+// ══════════════════════════════════════════════════
+// BUILD WORLD
+// ══════════════════════════════════════════════════
+function buildWorld(earthTex, heightTex) {
+  // Earth sphere
+  const geo = new THREE.SphereGeometry(EARTH_R, 128, 64);
+  const mat = new THREE.MeshPhongMaterial({
+    map: earthTex,
+    displacementMap: heightTex, displacementScale: DISP_SCALE,
+    bumpMap: heightTex, bumpScale: 0.4,
+    specular: new THREE.Color(0x081420), shininess: 18
+  });
+  earthObj = new THREE.Mesh(geo, mat);
+  earthObj.receiveShadow = true;
+  earthObj.castShadow    = true;
+  scene.add(earthObj);
+
+  // Atmosphere layers
+  const addAtm = (r, col, op, side) => {
+    const m = new THREE.MeshPhongMaterial({
+      color: col, transparent: true, opacity: op,
+      side, depthWrite: false, blending: THREE.AdditiveBlending
+    });
+    scene.add(new THREE.Mesh(new THREE.SphereGeometry(EARTH_R * r, 64, 32), m));
+  };
+  addAtm(1.028, 0x2244bb, 0.10, THREE.FrontSide);
+  addAtm(1.016, 0x6688ff, 0.06, THREE.BackSide);
+  addAtm(1.060, 0x1122aa, 0.04, THREE.FrontSide);
+
+  // Clouds
+  const cloudTex = genCloudTex(1024, 512);
+  cloudObj = new THREE.Mesh(
+    new THREE.SphereGeometry(EARTH_R * 1.009, 80, 40),
+    new THREE.MeshPhongMaterial({ map: cloudTex, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide })
+  );
+  scene.add(cloudObj);
+
+  // Ground detail plane
+  const gTex = genGroundTex();
+  groundPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.0, 1.0, 48, 48),
+    new THREE.MeshLambertMaterial({ map: gTex })
+  );
+  groundPlane.receiveShadow = true;
+  scene.add(groundPlane);
+
+  // Place trees
+  placeTrees();
+
+  // Show UI
+  earthBuilt = true;
+  document.getElementById('loading').style.display  = 'none';
+  document.getElementById('overlay').style.display  = 'flex';
+  document.getElementById('crosshair').style.display = 'block';
+  document.getElementById('hud').style.display       = 'block';
+  document.getElementById('hint').style.display      = 'block';
+}
+
+// ══════════════════════════════════════════════════
+// TREES
+// ══════════════════════════════════════════════════
+const trees = [];
+
+function makeTree() {
+  const g = new THREE.Group();
+  g.add(Object.assign(
+    new THREE.Mesh(new THREE.CylinderGeometry(0.00014, 0.00023, 0.0020, 5),
+                   new THREE.MeshLambertMaterial({ color: 0x3d2000 })),
+    {}
+  ));
+  const shades = [0x145c0e, 0x1e7518, 0x248c1e];
+  for (let i = 0; i < 3; i++) {
+    const cone = new THREE.Mesh(
+      new THREE.ConeGeometry(0.0010 * (1.5 - i * 0.28), 0.0016, 6),
+      new THREE.MeshLambertMaterial({ color: shades[i] })
+    );
+    cone.position.y = 0.0012 + i * 0.00095;
+    g.add(cone);
+  }
+  return g;
+}
+
+function placeTrees() {
+  const startLat = playerLat, startLon = playerLon;
+  for (let i = 0; i < 50; i++) {
+    const tLat = startLat + (Math.random() - 0.5) * 0.20;
+    const tLon = startLon + (Math.random() - 0.5) * 0.20;
+    const h = terrainNoise(tLat, tLon);
+    if (h < 0.505 || h > 0.80) continue;
+    const mesh = makeTree();
+    scene.add(mesh);
+    trees.push({ mesh, lat: tLat, lon: tLon });
+  }
+  positionTrees();
+}
+
+function positionTrees() {
+  const UP = new THREE.Vector3(0, 1, 0);
+  trees.forEach(t => {
+    const disp = terrainDisp(t.lat, t.lon);
+    const pos  = latlonVec(t.lat, t.lon, EARTH_R + disp + 0.00045);
+    t.mesh.position.copy(pos);
+    t.mesh.quaternion.setFromUnitVectors(UP, upVec(t.lat, t.lon));
+  });
+}
+
+// ══════════════════════════════════════════════════
+// MATH
+// ══════════════════════════════════════════════════
+function latlonVec(la, lo, r) {
+  return new THREE.Vector3(
+    r * Math.cos(la) * Math.cos(lo),
+    r * Math.sin(la),
+    r * Math.cos(la) * Math.sin(lo)
+  );
+}
+
+function upVec(la, lo) {
+  return new THREE.Vector3(
+    Math.cos(la) * Math.cos(lo),
+    Math.sin(la),
+    Math.cos(la) * Math.sin(lo)
+  ).normalize();
+}
+
+function eastVec(lo) {
+  return new THREE.Vector3(-Math.sin(lo), 0, Math.cos(lo)).normalize();
+}
+
+function northVec(la, lo) {
+  return upVec(la, lo).clone().cross(eastVec(lo)).negate().normalize();
+}
+
+// ══════════════════════════════════════════════════
+// PLAYER
+// ══════════════════════════════════════════════════
+let playerLat = 0.28, playerLon = 0.0;
+let playerAlt = 0.0;   // extra height above terrain
+let velY      = 0.0;
+let onGround  = true;
+let yaw = 0, pitch = 0;
+
+const GRAVITY  = 0.000065;
+const WALK_SPD = 0.00140;
+const RUN_SPD  = 0.00520;
+const JUMP_V   = 0.0038;
+
+// ══════════════════════════════════════════════════
+// CONTROLS
+// ══════════════════════════════════════════════════
+const keys = {};
+let locked = false;
+
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Escape' && locked) document.exitPointerLock();
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+document.addEventListener('mousemove', e => {
+  if (!locked) return;
+  yaw   -= e.movementX * 0.0024;
+  pitch  = Math.max(-1.45, Math.min(1.45, pitch - e.movementY * 0.0024));
+});
+
+document.addEventListener('pointerlockchange', () => {
+  locked = !!document.pointerLockElement;
+  document.getElementById('paused').style.display = (earthBuilt && !locked) ? 'flex' : 'none';
+});
+
+document.getElementById('start-btn').addEventListener('click', () => {
+  document.getElementById('overlay').style.display = 'none';
+  renderer.domElement.requestPointerLock();
+});
+
+document.getElementById('paused').addEventListener('click', () => {
+  renderer.domElement.requestPointerLock();
+});
+
+renderer.domElement.addEventListener('click', () => {
+  if (earthBuilt && !locked) renderer.domElement.requestPointerLock();
+});
+
+// ══════════════════════════════════════════════════
+// UPDATE
+// ══════════════════════════════════════════════════
+function updatePlayer(dt) {
+  if (!locked || !earthBuilt) return;
+
+  const run   = keys['ShiftLeft'] || keys['ShiftRight'];
+  const speed = run ? RUN_SPD : WALK_SPD;
+
+  // Jump
+  if (keys['Space'] && onGround) {
+    velY     = JUMP_V;
+    onGround = false;
+  }
+
+  // Gravity
+  velY      -= GRAVITY * dt;
+  playerAlt += velY * dt;
+  if (playerAlt <= 0) { playerAlt = 0; velY = 0; onGround = true; }
+
+  // Directions
+  const north = northVec(playerLat, playerLon);
+  const east  = eastVec(playerLon);
+
+  const fwd   = north.clone().multiplyScalar(Math.cos(yaw)).add(east.clone().multiplyScalar(Math.sin(yaw)));
+  const right = east.clone().multiplyScalar(Math.cos(yaw)).add(north.clone().multiplyScalar(-Math.sin(yaw)));
+
+  let dz = 0, dx = 0;
+  if (keys['KeyW'] || keys['ArrowUp'])    dz += speed * dt;
+  if (keys['KeyS'] || keys['ArrowDown'])  dz -= speed * dt;
+  if (keys['KeyA'] || keys['ArrowLeft'])  dx -= speed * dt;
+  if (keys['KeyD'] || keys['ArrowRight']) dx += speed * dt;
+
+  if (dz !== 0 || dx !== 0) {
+    const cur = latlonVec(playerLat, playerLon, EARTH_R);
+    const nxt = cur.clone()
+      .add(fwd.clone().multiplyScalar(dz))
+      .add(right.clone().multiplyScalar(dx));
+    nxt.setLength(EARTH_R);
+    playerLat = Math.asin(Math.max(-1, Math.min(1, nxt.y / EARTH_R)));
+    playerLon = Math.atan2(nxt.z, nxt.x);
+  }
+
+  // HUD
+  document.getElementById('h-lat').textContent = (playerLat * 180 / Math.PI).toFixed(4) + '°';
+  document.getElementById('h-lon').textContent = (playerLon * 180 / Math.PI).toFixed(4) + '°';
+  document.getElementById('h-alt').textContent = (playerAlt * 100000 | 0) + ' m';
+  document.getElementById('h-spd').textContent = run ? 'RUNNING' : 'WALKING';
+}
+
+function updateCamera() {
+  if (!earthBuilt) return;
+  const disp = terrainDisp(playerLat, playerLon);
+  const r    = EARTH_R + disp + EYE_H + playerAlt;
+  const pos  = latlonVec(playerLat, playerLon, r);
+  camera.position.copy(pos);
+
+  const up    = upVec(playerLat, playerLon);
+  const east  = eastVec(playerLon);
+  const north = northVec(playerLat, playerLon);
+  const fwd   = north.clone().multiplyScalar(Math.cos(yaw)).add(east.clone().multiplyScalar(Math.sin(yaw)));
+  const lookDir = fwd.clone().multiplyScalar(Math.cos(pitch)).add(up.clone().multiplyScalar(Math.sin(pitch)));
+  camera.up.copy(up);
+  camera.lookAt(pos.clone().add(lookDir));
+}
+
+function updateGroundPlane() {
+  if (!groundPlane || !earthBuilt) return;
+  const disp = terrainDisp(playerLat, playerLon);
+  const pos  = latlonVec(playerLat, playerLon, EARTH_R + disp + 0.00003);
+  groundPlane.position.copy(pos);
+  groundPlane.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), upVec(playerLat, playerLon));
+}
+
+// ══════════════════════════════════════════════════
+// RENDER LOOP
+// ══════════════════════════════════════════════════
+let lastT = 0;
+
+function animate(t) {
+  requestAnimationFrame(animate);
+  const dt = Math.min(t - lastT, 50);
+  lastT = t;
+
+  if (cloudObj) cloudObj.rotation.y += 0.000025;
+
+  updatePlayer(dt);
+  updateCamera();
+  updateGroundPlane();
+
+  renderer.render(scene, camera);
+}
+
+// ══════════════════════════════════════════════════
+// INIT — generate textures, then build world
+// ══════════════════════════════════════════════════
+let earthTexDone = false, heightTexDone = false;
+let pendingEarthTex, pendingHeightTex;
+
+function tryBuild() {
+  if (earthTexDone && heightTexDone) {
+    setProgress(100, 'ASSEMBLING WORLD...');
+    setTimeout(() => buildWorld(pendingEarthTex, pendingHeightTex), 80);
+  }
+}
+
+setProgress(2, 'STARTING TERRAIN GENERATOR...');
+
+// Earth color texture — 1024×512
+genEarthTex(1024, 512,
+  p => setProgress(2 + p * 65, `PAINTING TERRAIN... ${(p * 100) | 0}%`),
+  tex => { pendingEarthTex = tex; earthTexDone = true; setProgress(67); tryBuild(); }
+);
+
+// Height / displacement texture — 512×256
+genHeightTex(512, 256, tex => {
+  pendingHeightTex = tex; heightTexDone = true;
+  setProgress(Math.max(parseFloat(barFill.style.width || 0), 70));
+  tryBuild();
+});
+
+// Initial camera (view from space while loading)
+camera.position.set(0, EARTH_R * 2.5, 0);
+camera.lookAt(0, 0, 0);
+animate(0);
+
+// Handle resize
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
