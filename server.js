@@ -22,9 +22,10 @@ function readToken() {
   return "";
 }
 const TOKEN  = readToken();
-// Branches to try, in order. The panel may set BRANCH=master (which doesn't
-// exist), so we always fall back to the real branch automatically.
-const BRANCHES = [process.env.BRANCH, "claude/festive-faraday-b4ljrz", "main", "master"]
+// Branches to try, in order. The website lives on the feature branch, so we
+// try it FIRST — the panel often sets BRANCH=master, which only holds the old
+// 2-file repo and must not win.
+const BRANCHES = ["claude/festive-faraday-b4ljrz", process.env.BRANCH, "main", "master"]
   .filter(Boolean)
   .filter((b, i, a) => a.indexOf(b) === i);
 
