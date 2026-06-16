@@ -10,11 +10,16 @@ const path  = require("path");
 
 const PORT   = process.env.SERVER_PORT || process.env.PORT || 8080;
 const REPO   = process.env.REPO   || "hail12a/Yesp";
+// Personal access token — required only if the repo is PRIVATE.
+const TOKEN  = process.env.GITHUB_TOKEN || process.env.TOKEN || "";
 // Branches to try, in order. The panel may set BRANCH=master (which doesn't
 // exist), so we always fall back to the real branch automatically.
 const BRANCHES = [process.env.BRANCH, "claude/festive-faraday-b4ljrz", "main", "master"]
   .filter(Boolean)
   .filter((b, i, a) => a.indexOf(b) === i);
+
+// auth header for the GitHub API (works for private repos with a token)
+const AUTH = TOKEN ? { Authorization: `token ${TOKEN}` } : {};
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -46,20 +51,22 @@ function get(url, headers = {}) {
   });
 }
 
-/* ---- pull every file from the first branch that exists ---- */
+/* ---- pull every file from the first branch that exists ----
+   Uses the GitHub blob API (base64) so it works for PRIVATE repos
+   too — no reliance on raw.githubusercontent.com. ---- */
 async function updateFromBranch(branch) {
   const SKIP = [".git"]; // never overwrite git internals
-  const meta = JSON.parse(await get(`https://api.github.com/repos/${REPO}/branches/${branch}`));
+  const meta = JSON.parse(await get(`https://api.github.com/repos/${REPO}/branches/${branch}`, AUTH));
   const treeSha = meta.commit.commit.tree.sha;
-  const tree = JSON.parse(await get(`https://api.github.com/repos/${REPO}/git/trees/${treeSha}?recursive=1`));
+  const tree = JSON.parse(await get(`https://api.github.com/repos/${REPO}/git/trees/${treeSha}?recursive=1`, AUTH));
 
   let count = 0;
   for (const entry of tree.tree) {
     if (entry.type !== "blob") continue;
     if (SKIP.some(s => entry.path.startsWith(s))) continue;
 
-    const raw = `https://raw.githubusercontent.com/${REPO}/${encodeURI(branch)}/${entry.path.split("/").map(encodeURIComponent).join("/")}`;
-    const data = await get(raw);
+    const blob = JSON.parse(await get(`https://api.github.com/repos/${REPO}/git/blobs/${entry.sha}`, AUTH));
+    const data = Buffer.from(blob.content, blob.encoding || "base64");
     const dest = path.join(__dirname, entry.path);
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, data);
