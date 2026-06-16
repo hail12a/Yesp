@@ -14,6 +14,7 @@
 
 local Players     = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
+local Marketplace = game:GetService("MarketplaceService")
 
 local ENDPOINT = "http://78.108.218.209:8098"  -- your Yesp site
 local ROOM     = "avatars"
@@ -23,7 +24,33 @@ local function headshot(userId)
 	return ("https://www.roblox.com/headshot-thumbnail/image?userId=%d&width=420&height=420&format=png"):format(userId)
 end
 
--- pull the worn items off the player's avatar
+-- item thumbnail + catalog link the website can use
+local function assetThumb(assetId)
+	return ("https://www.roblox.com/asset-thumbnail/image?assetId=%d&width=150&height=150&format=png"):format(assetId)
+end
+
+-- cache product lookups so we don't hammer the API
+local infoCache = {}
+local function itemInfo(kind, id)
+	local name = infoCache[id]
+	if name == nil then
+		name = "Asset " .. id
+		pcall(function()
+			local info = Marketplace:GetProductInfo(id)
+			if info and info.Name then name = info.Name end
+		end)
+		infoCache[id] = name
+	end
+	return {
+		kind  = kind,
+		id    = id,
+		name  = name,
+		thumb = assetThumb(id),
+		link  = "https://www.roblox.com/catalog/" .. id,  -- item's page on Roblox
+	}
+end
+
+-- pull the worn items off the player's avatar (with names + links)
 local function gatherItems(userId)
 	local items = {}
 	local ok, desc = pcall(function()
@@ -32,10 +59,10 @@ local function gatherItems(userId)
 	if not ok or not desc then return items end
 
 	-- clothing
-	if desc.Shirt   ~= 0 then table.insert(items, { kind = "Shirt",      id = desc.Shirt }) end
-	if desc.Pants   ~= 0 then table.insert(items, { kind = "Pants",      id = desc.Pants }) end
-	if desc.GraphicTShirt ~= 0 then table.insert(items, { kind = "TShirt", id = desc.GraphicTShirt }) end
-	if desc.Face    ~= 0 then table.insert(items, { kind = "Face",       id = desc.Face }) end
+	if desc.Shirt   ~= 0 then table.insert(items, itemInfo("Shirt",  desc.Shirt)) end
+	if desc.Pants   ~= 0 then table.insert(items, itemInfo("Pants",  desc.Pants)) end
+	if desc.GraphicTShirt ~= 0 then table.insert(items, itemInfo("TShirt", desc.GraphicTShirt)) end
+	if desc.Face    ~= 0 then table.insert(items, itemInfo("Face",   desc.Face)) end
 
 	-- accessories come as comma-separated asset id lists
 	for _, field in ipairs({ "HatAccessory","HairAccessory","FaceAccessory",
@@ -44,7 +71,7 @@ local function gatherItems(userId)
 		local list = desc[field]
 		if list and list ~= "" then
 			for idStr in string.gmatch(list, "%d+") do
-				table.insert(items, { kind = field, id = tonumber(idStr) })
+				table.insert(items, itemInfo(field, tonumber(idStr)))
 			end
 		end
 	end

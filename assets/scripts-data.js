@@ -13,7 +13,7 @@ const SCRIPTS = [
     file: "scripts/avatar-collector.lua",
     tags: ["avatars", "players", "datastore", "prototype"],
     what: "Saves player avatars.",
-    does: "When a player joins, it grabs their headshot, worn items (clothing + accessories) and join date, then sends it all to your site's Avatar Vault. A prototype for building an avatar archive over time.",
+    does: "When a player joins, it grabs their headshot plus every worn item — looking up each item's real name and thumbnail and linking it to its Roblox catalog page — then sends it all to your site's Avatar Vault, stamped with the join date.",
   },
   {
     id: "bridge-core",

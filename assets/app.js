@@ -191,12 +191,19 @@
 
     const card = m => {
       const d = m.data || {};
-      const items = (d.items || []).map(it => `<span class="av-item">${escapeHtml(it.kind)}:${it.id}</span>`).join('') || '<span class="av-none">no items read</span>';
+      const items = (d.items || []).map(it => {
+        const link = it.link || ('https://www.roblox.com/catalog/' + it.id);
+        const img = it.thumb ? `<img src="${escapeHtml(it.thumb)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"/>` : '';
+        const name = escapeHtml(it.name || it.kind || ('Asset ' + it.id));
+        return `<a class="av-it" href="${escapeHtml(link)}" target="_blank" rel="noopener" title="${name} · open on Roblox">
+          ${img}<span class="av-it-name">${name}</span><span class="av-it-kind">${escapeHtml(it.kind || '')}</span></a>`;
+      }).join('') || '<span class="av-none">no items read</span>';
       const when = d.joined ? new Date(d.joined).toLocaleString() : new Date(m.ts).toLocaleString();
       const img = d.thumb ? `<img src="${escapeHtml(d.thumb)}" alt="" loading="lazy" onerror="this.style.display='none'"/>` : '';
+      const profile = d.userId ? `https://www.roblox.com/users/${d.userId}/profile` : '#';
       return `<div class="av-card">
-        <div class="av-head">${img}<div><div class="av-name">${escapeHtml(d.name || '?')}</div><div class="av-sub">${escapeHtml(d.displayName || '')} · id ${escapeHtml(String(d.userId || '—'))}</div></div></div>
-        <div class="av-when">🕒 ${when}</div>
+        <div class="av-head">${img}<div><a class="av-name" href="${profile}" target="_blank" rel="noopener">${escapeHtml(d.name || '?')}</a><div class="av-sub">${escapeHtml(d.displayName || '')} · id ${escapeHtml(String(d.userId || '—'))}</div></div></div>
+        <div class="av-when">🕒 ${when} &nbsp;·&nbsp; ${(d.items || []).length} items</div>
         <div class="av-items">${items}</div>
       </div>`;
     };
@@ -205,7 +212,8 @@
       try {
         const r = await fetch('/api/messages?room=avatars', { cache: 'no-store' });
         const list = await r.json();
-        dot.className = 'dot on'; status.textContent = `live · ${list.length} avatars`;
+        const totalItems = list.reduce((n, m) => n + ((m.data && m.data.items) ? m.data.items.length : 0), 0);
+        dot.className = 'dot on'; status.textContent = `live · ${list.length} avatars · ${totalItems} items`;
         const key = list.map(m => (m.data && m.data.userId) + ':' + m.ts).join('|');
         if (key !== lastKey) {
           grid.innerHTML = list.length ? list.slice().reverse().map(card).join('')
