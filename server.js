@@ -11,7 +11,17 @@ const path  = require("path");
 const PORT   = process.env.SERVER_PORT || process.env.PORT || 8080;
 const REPO   = process.env.REPO   || "hail12a/Yesp";
 // Personal access token — required only if the repo is PRIVATE.
-const TOKEN  = process.env.GITHUB_TOKEN || process.env.TOKEN || "";
+// Read from env var, or from a local token.txt file (which is gitignored
+// so the secret never gets committed to the repo).
+function readToken() {
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN.trim();
+  if (process.env.TOKEN) return process.env.TOKEN.trim();
+  for (const f of ["token.txt", ".token"]) {
+    try { return fs.readFileSync(path.join(__dirname, f), "utf8").trim(); } catch (_) {}
+  }
+  return "";
+}
+const TOKEN  = readToken();
 // Branches to try, in order. The panel may set BRANCH=master (which doesn't
 // exist), so we always fall back to the real branch automatically.
 const BRANCHES = [process.env.BRANCH, "claude/festive-faraday-b4ljrz", "main", "master"]
