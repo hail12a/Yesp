@@ -1,33 +1,98 @@
-const http = require("http");
-const fs   = require("fs");
-const path = require("path");
+/* =========================================================
+   Yesp Docs — self-updating static server.
+   On every startup it pulls the latest files from GitHub,
+   then serves them. No manual uploads, no git, no npm.
+   ========================================================= */
+const http  = require("http");
+const https = require("https");
+const fs    = require("fs");
+const path  = require("path");
 
-const PORT = process.env.PORT || 8080;
+const PORT   = process.env.PORT   || 8080;
+const REPO   = process.env.REPO   || "hail12a/Yesp";
+const BRANCH = process.env.BRANCH || "claude/festive-faraday-b4ljrz";
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".css":  "text/css; charset=utf-8",
   ".js":   "application/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
   ".ico":  "image/x-icon",
   ".png":  "image/png",
+  ".jpg":  "image/jpeg",
   ".svg":  "image/svg+xml",
 };
 
-http.createServer((req, res) => {
-  let filePath = path.join(__dirname, req.url === "/" ? "index.html" : req.url);
-
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
-      // try index.html for any unmatched route (SPA fallback)
-      fs.readFile(path.join(__dirname, "index.html"), (e2, d2) => {
-        if (e2) { res.writeHead(404); res.end("Not found"); return; }
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(d2);
-      });
-      return;
-    }
-    const ext = path.extname(filePath);
-    res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream" });
-    res.end(data);
+/* ---- tiny HTTPS GET that follows redirects ---- */
+function get(url, headers = {}) {
+  return new Promise((resolve, reject) => {
+    https.get(url, { headers: { "User-Agent": "yesp-updater", ...headers } }, res => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        return resolve(get(res.headers.location, headers));
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
+      }
+      const chunks = [];
+      res.on("data", c => chunks.push(c));
+      res.on("end", () => resolve(Buffer.concat(chunks)));
+    }).on("error", reject);
   });
-}).listen(PORT, () => console.log(`Yesp Docs running on port ${PORT}`));
+}
+
+/* ---- pull every file in the branch from GitHub ---- */
+async function selfUpdate() {
+  // skip these so the updater never fights the running process / git
+  const SKIP = new Set([".git"]);
+  try {
+    console.log(`[updater] checking ${REPO}@${BRANCH} for updates…`);
+    const branch = JSON.parse(await get(`https://api.github.com/repos/${REPO}/branches/${BRANCH}`));
+    const treeSha = branch.commit.commit.tree.sha;
+    const tree = JSON.parse(await get(`https://api.github.com/repos/${REPO}/git/trees/${treeSha}?recursive=1`));
+
+    let count = 0;
+    for (const entry of tree.tree) {
+      if (entry.type !== "blob") continue;
+      if ([...SKIP].some(s => entry.path.startsWith(s))) continue;
+
+      const raw = `https://raw.githubusercontent.com/${REPO}/${encodeURI(BRANCH)}/${entry.path.split("/").map(encodeURIComponent).join("/")}`;
+      const data = await get(raw);
+      const dest = path.join(__dirname, entry.path);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, data);
+      count++;
+    }
+    console.log(`[updater] updated ${count} files ✔`);
+  } catch (e) {
+    console.log(`[updater] skipped (using local files): ${e.message}`);
+  }
+}
+
+/* ---- static file server ---- */
+function startServer() {
+  http.createServer((req, res) => {
+    const urlPath = decodeURIComponent(req.url.split("?")[0]);
+    let filePath = path.join(__dirname, urlPath === "/" ? "index.html" : urlPath);
+
+    // keep requests inside the app folder
+    if (!filePath.startsWith(__dirname)) { res.writeHead(403); return res.end("Forbidden"); }
+
+    fs.readFile(filePath, (err, data) => {
+      if (err) {
+        // SPA fallback → index.html
+        return fs.readFile(path.join(__dirname, "index.html"), (e2, d2) => {
+          if (e2) { res.writeHead(404); return res.end("Not found"); }
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(d2);
+        });
+      }
+      res.writeHead(200, { "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream" });
+      res.end(data);
+    });
+  }).listen(PORT, () => console.log(`Yesp Docs running on port ${PORT}`));
+}
+
+/* ---- boot: update first, then serve no matter what ---- */
+selfUpdate().finally(startServer);
