@@ -8,7 +8,7 @@ const https = require("https");
 const fs    = require("fs");
 const path  = require("path");
 
-const PORT   = process.env.PORT   || 8080;
+const PORT   = process.env.SERVER_PORT || process.env.PORT || 8080;
 const REPO   = process.env.REPO   || "hail12a/Yesp";
 const BRANCH = process.env.BRANCH || "claude/festive-faraday-b4ljrz";
 
