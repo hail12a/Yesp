@@ -103,6 +103,7 @@
     wireConsole();
     wireScriptLibrary();
     wireAvatarVault();
+    if (typeof window.wireWorldBuilder === 'function') window.wireWorldBuilder();
   }
 
   /* ---------- SCRIPT LIBRARY ---------- */

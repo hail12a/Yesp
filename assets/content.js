@@ -397,6 +397,76 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
   `
 },
 
+/* ----------------------- WORLD BUILDER ----------------------- */
+'/world-builder': {
+  section: 'world', title: 'World Builder',
+  html: () => `
+    <span class="eyebrow">REAL-WORLD TERRAIN · 1:1</span>
+    <h1>World Builder</h1>
+    <p class="lead">Pick a spot on Earth and a size. This pulls <strong>real elevation data</strong> (NASA/SRTM via Terrarium tiles) and <strong>real roads</strong> (OpenStreetMap), then writes you a Roblox Studio script that builds the terrain and roads <strong>1 stud = 1 metre</strong>. Default start: Vienna.</p>
+
+    <div class="callout info"><span class="ico">🌍</span><p>All data is fetched live in your browser from open sources — no keys, no server. Bigger areas take longer and are auto-downsampled so the script stays runnable.</p></div>
+
+    <h2 id="pick">1 · Pick a location</h2>
+    <div class="wb-cities" id="wb-cities">
+      <button data-lat="48.2082" data-lon="16.3738">🇦🇹 Vienna</button>
+      <button data-lat="47.0707" data-lon="15.4395">🇦🇹 Graz</button>
+      <button data-lat="46.6247" data-lon="14.3055">🇦🇹 Klagenfurt</button>
+      <button data-lat="47.2692" data-lon="11.4041">🇦🇹 Innsbruck</button>
+      <button data-lat="45.9763" data-lon="7.6586">🏔️ Matterhorn</button>
+      <button data-lat="36.5785" data-lon="-118.2923">🏔️ Mt Whitney</button>
+    </div>
+
+    <div class="wb-grid">
+      <label class="wb-field"><span>Latitude</span><input id="wb-lat" type="number" step="0.0001" value="48.2082" /></label>
+      <label class="wb-field"><span>Longitude</span><input id="wb-lon" type="number" step="0.0001" value="16.3738" /></label>
+      <label class="wb-field"><span>Area size</span>
+        <select id="wb-size">
+          <option value="1">1 × 1 km</option>
+          <option value="2">2 × 2 km</option>
+          <option value="4">4 × 4 km</option>
+          <option value="8">8 × 8 km</option>
+          <option value="16">16 × 16 km</option>
+        </select>
+      </label>
+      <label class="wb-field"><span>Detail</span>
+        <select id="wb-detail">
+          <option value="2">Ultra (2 m)</option>
+          <option value="4" selected>High (4 m)</option>
+          <option value="8">Medium (8 m)</option>
+          <option value="16">Fast (16 m)</option>
+        </select>
+      </label>
+      <label class="wb-check"><input id="wb-roads" type="checkbox" checked /> <span>Include roads (OpenStreetMap)</span></label>
+      <label class="wb-check"><input id="wb-water" type="checkbox" checked /> <span>Fill water below sea-ish level</span></label>
+    </div>
+
+    <button class="wb-gen" id="wb-gen">⛰️  Generate terrain script</button>
+    <div class="wb-status" id="wb-status">Idle — pick a place and hit generate.</div>
+
+    <h2 id="result">2 · Your script</h2>
+    <div class="wb-stats" id="wb-stats">No script yet.</div>
+
+    <div class="wb-out-actions">
+      <button class="wb-copy" id="wb-copy" disabled>Copy script</button>
+      <a class="wb-dl" id="wb-dl" aria-disabled="true">Download .lua</a>
+    </div>
+    <div class="code wb-codebox"><div class="code-head"><span class="code-lang">lua · paste into Studio</span></div><pre><code id="wb-out">-- generate a script above, then paste it into the Studio Command Bar (View → Command Bar) and press Enter</code></pre></div>
+
+    <h2 id="how">3 · Run it in Studio</h2>
+    <ol class="wb-steps">
+      <li>Open <strong>Roblox Studio</strong> on a new baseplate.</li>
+      <li>Show the Command Bar: <strong>View → Command Bar</strong>.</li>
+      <li><strong>Copy</strong> the script above and paste it into the Command Bar, then press <kbd>Enter</kbd>. (For big areas, paste it into a <code class="inline-code">Script</code> and run — the Command Bar has a length limit.)</li>
+      <li>Watch the terrain build. It draws in chunks so Studio stays responsive.</li>
+    </ol>
+
+    <div class="callout warn"><span class="ico">⚠️</span><p>The Command Bar caps very long input. If the script is large, the <strong>Download .lua</strong> button gives you a file — drop it into <code class="inline-code">ServerScriptService</code> as a <code class="inline-code">Script</code>, run once, then delete it.</p></div>
+
+    ${pager({ href: '/avatars', title: 'Avatar Vault' }, { href: '/quantum', title: 'Quantum Lab' })}
+  `
+},
+
 /* ----------------------- QUANTUM LAB ----------------------- */
 '/quantum': {
   section: 'quantum', title: 'The Lab',
