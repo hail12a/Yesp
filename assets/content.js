@@ -42,7 +42,7 @@ const PAGES = {
   html: () => `
     <span class="eyebrow">YESP DOCS</span>
     <h1>Welcome to Yesp</h1>
-    <p class="lead">Two worlds, one docs hub. Drop into <strong>Battlefeuer S2</strong> — a fast, tactical Roblox shooter — or step into the <strong>Quantum Lab</strong>, where we write code the way no one was supposed to.</p>
+    <p class="lead">Two worlds, one docs hub. Open the <strong>Battlefeuer Bridge</strong> — a live two-way link between the Roblox game and this website — or step into the <strong>Quantum Lab</strong>, where we write code the way no one was supposed to.</p>
 
     <div class="hero">
       <p style="margin:0 0 6px;font-family:var(--mono);font-size:13px;color:var(--accent-ink)">// pick a universe</p>
@@ -51,9 +51,9 @@ const PAGES = {
 
     <div class="card-grid">
       <a class="card" href="#/battlefeuer" data-link>
-        <div class="card-icon">🎮</div>
-        <h4>Battlefeuer S2</h4>
-        <p>Loadouts, maps, modes and pro tips for the FFS B39.11 build.</p>
+        <div class="card-icon">📡</div>
+        <h4>Battlefeuer Bridge</h4>
+        <p>A Lua script + live console that link the game to this site, plus a Lua converter.</p>
       </a>
       <a class="card" href="#/quantum" data-link>
         <div class="card-icon">⚛️</div>
@@ -69,10 +69,10 @@ const PAGES = {
 
     <h2 id="two-tabs">The two tabs</h2>
     ${tabs('ov', [
-      { label: '🎮 Battlefeuer', body: `
-        <p>The <strong>Battlefeuer S2</strong> tab is a living field manual for the Roblox game <em>Battlefeuer S2 [FFS] B39.11</em>. It covers everything from your first match to frame-perfect movement tech.</p>
-        <ul><li>Beginner-friendly <strong>Get Started</strong> walkthrough</li><li>Full <strong>loadout & weapon</strong> breakdowns</li><li><strong>Maps & modes</strong> with callouts</li><li>A stack of <strong>pro tips</strong> in expandable cards</li></ul>
-        <p><a class="inline" href="#/battlefeuer" data-link>Open the game docs →</a></p>` },
+      { label: '📡 Battlefeuer Bridge', body: `
+        <p>The <strong>Battlefeuer Bridge</strong> tab turns the Roblox game <em>Battlefeuer S2 [FFS] B39.11</em> into a live data source for this website. Paste one Lua script and the game starts talking to the browser.</p>
+        <ul><li>A ready-to-paste <strong>bridge script</strong> using HttpService</li><li><strong>Wonder-Scripts</strong> — scientific experiments that report live data</li><li>A <strong>Decoder & Converter</strong>: Lua ⇄ WonderScript, and other→Lua</li><li>A <strong>Live Console</strong> that shows game events and sends commands back</li></ul>
+        <p><a class="inline" href="#/battlefeuer" data-link>Open the bridge →</a></p>` },
       { label: '⚛️ Quantum Lab', body: `
         <p>The <strong>Quantum Lab</strong> tab is where code stops being ordinary. Each experiment takes a normal programming idea and pushes it to the edge of what's reasonable — superposition data types, entangled variables, quantum-walk search, simulated annealing of "reality".</p>
         <p>It's part real algorithm, part thought experiment. Every snippet runs as plain Python or JS — the <em>thinking</em> is the revolutionary part.</p>
@@ -108,174 +108,254 @@ const PAGES = {
   `
 },
 
-/* ----------------------- BATTLEFEUER ----------------------- */
+/* ----------------------- BATTLEFEUER BRIDGE ----------------------- */
 '/battlefeuer': {
-  section: 'battlefeuer', title: 'Game Overview',
+  section: 'battlefeuer', title: 'Bridge Overview',
   html: () => `
-    <span class="eyebrow">BATTLEFEUER S2 · FFS B39.11</span>
-    <h1>Battlefeuer S2</h1>
-    <p class="lead">A fast, tactical first-person firefight on Roblox. Tight gunplay, readable maps, and a time-to-kill that rewards aim and positioning over luck.</p>
+    <span class="eyebrow">BATTLEFEUER BRIDGE · LIVE COMMS</span>
+    <h1>The Game ↔ Website Bridge</h1>
+    <p class="lead">Paste one Lua script into <strong>Battlefeuer S2</strong> and the game starts talking to <em>this</em> website in real time — events flow out, commands flow back. It's a two-way radio between Roblox and the browser.</p>
 
     <div class="hero">
-      <p style="margin:0 0 10px;font-size:16px;color:var(--ink)">"Battlefeuer" — German for <em>battle fire</em>. Season 2, Frontline Firefight System, build B39.11.</p>
-      <a class="play-btn" href="https://www.roblox.com/games/112971188400049/Battlefeuer-S2-FFS-B39-11" target="_blank" rel="noopener">Play on Roblox ▸</a>
+      <p style="margin:0 0 8px;font-family:var(--mono);font-size:13px;color:var(--accent-ink)">// how it flows</p>
+      <p style="margin:0;font-size:16px;color:var(--ink)"><strong>Roblox Lua</strong> &nbsp;──HttpService──▶&nbsp; <strong>server.js /api</strong> &nbsp;──fetch──▶&nbsp; <strong>Live Console</strong><br/>and back the other way for commands.</p>
     </div>
 
     <div class="stat-row">
-      <div class="stat"><b>FPS</b><span>First-person shooter</span></div>
-      <div class="stat"><b>S2</b><span>Current season</span></div>
-      <div class="stat"><b>B39.11</b><span>Build version</span></div>
-      <div class="stat"><b>FFS</b><span>Frontline Firefight</span></div>
+      <div class="stat"><b>POST</b><span>game → site events</span></div>
+      <div class="stat"><b>GET</b><span>site → game commands</span></div>
+      <div class="stat"><b>JSON</b><span>the wire format</span></div>
+      <div class="stat"><b>~1s</b><span>poll interval</span></div>
     </div>
 
-    <h2 id="what">What is it?</h2>
-    <p>Battlefeuer S2 is a round-based shooter where two squads fight over objectives across compact maps. Matches are quick, gear is earned, and the skill ceiling lives in your movement and recoil control.</p>
-
-    <h2 id="pillars">Design pillars</h2>
+    <h2 id="parts">The three parts</h2>
     <div class="card-grid">
-      <div class="card"><div class="card-icon">🎯</div><h4>Aim first</h4><p>Low TTK means crisp aim beats bullet-hosing every time.</p></div>
-      <div class="card"><div class="card-icon">🏃</div><h4>Movement tech</h4><p>Slide-cancels and peeker's advantage decide duels.</p></div>
-      <div class="card"><div class="card-icon">🧩</div><h4>Readable maps</h4><p>Clear sightlines, fair flanks, no random death.</p></div>
+      <a class="card" href="#/bf-getstarted" data-link><div class="card-icon">📡</div><h4>Get the Script</h4><p>The Lua you paste into the game to open the radio link.</p></a>
+      <a class="card" href="#/bf-loadout" data-link><div class="card-icon">🔭</div><h4>Wonder-Scripts</h4><p>Scientific experiment scripts that report live data to the site.</p></a>
+      <a class="card" href="#/bf-maps" data-link><div class="card-icon">🧬</div><h4>Decoder & Converter</h4><p>Lua ⇄ our custom WonderScript, plus other→Lua.</p></a>
     </div>
 
-    <div class="callout warn"><span class="ico">⚠️</span><p>Build B39.11 tunes recoil and hit-reg. Older muscle memory from S1 may feel slightly off — re-zero in a private server first.</p></div>
-    ${pager({ href: '/overview', title: 'Overview' }, { href: '/bf-getstarted', title: 'Get Started' })}
+    <div class="callout warn"><span class="ico">⚠️</span><p>Roblox <code class="inline-code">HttpService</code> must be enabled (Game Settings → Security → <em>Allow HTTP Requests</em>), and scripts must run server-side. This is for your <strong>own</strong> experience / experiments — don't use it where it breaks a game's rules.</p></div>
+    ${pager({ href: '/overview', title: 'Overview' }, { href: '/bf-getstarted', title: 'Get the Script' })}
   `
 },
 
 '/bf-getstarted': {
-  section: 'battlefeuer', title: 'Get Started',
+  section: 'battlefeuer', title: 'Get the Script',
   html: () => `
-    <span class="eyebrow">BATTLEFEUER · GUIDE</span>
-    <h1>Get Started</h1>
-    <p class="lead">From cold launch to your first elimination. Pick your platform and follow along.</p>
+    <span class="eyebrow">BRIDGE · SETUP</span>
+    <h1>Get the Script</h1>
+    <p class="lead">Drop this into a server <code class="inline-code">Script</code> in Roblox Studio (or your executor's server context). It opens the live link to this website.</p>
 
-    <h2 id="launch">Launch the game</h2>
-    ${tabs('bfstart', [
-      { label: '🖥️ PC', body: `
-        <ol><li>Open the <a class="inline" href="https://www.roblox.com/games/112971188400049/Battlefeuer-S2-FFS-B39-11" target="_blank" rel="noopener">game page</a> and hit the green <strong>Play</strong> button.</li>
-        <li>Let the Roblox client boot, then wait in the lobby for matchmaking.</li>
-        <li>Bind your keys: <code class="inline-code">WASD</code> move, <code class="inline-code">Shift</code> sprint, <code class="inline-code">C</code> crouch, <code class="inline-code">Space</code> jump.</li></ol>` },
-      { label: '📱 Mobile', body: `
-        <ol><li>Open the Roblox app and search <strong>Battlefeuer S2</strong>.</li>
-        <li>Enable the <strong>gyro aim</strong> option in settings for finer control.</li>
-        <li>Resize the on-screen fire button so it sits under your thumb.</li></ol>
-        <div class="callout tip"><span class="ico">📲</span><p>Mobile players: turn on "aim assist snap" but keep "auto-fire" off — it wastes ammo and reveals your position.</p></div>` },
-      { label: '🎮 Controller', body: `
-        <ol><li>Pair your controller before launching Roblox.</li>
-        <li>Set <strong>aim sensitivity</strong> to ~35% and <strong>ADS sensitivity</strong> lower (~25%).</li>
-        <li>Swap jump to a bumper so you can keep your thumb on the stick while jump-peeking.</li></ol>` },
-    ])}
+    <h2 id="endpoint">1 · Point it at your site</h2>
+    <p>The bridge talks to the API built into <code class="inline-code">server.js</code>. Your site is hosted at the address below — the script already uses it:</p>
+    ${code('lua', `<span class="tok-key">local</span> ENDPOINT = <span class="tok-str">"http://78.108.218.209:8098"</span>  <span class="tok-com">-- your Yesp site</span>`)}
 
-    <h2 id="firstmatch">Your first match</h2>
+    <h2 id="script">2 · The bridge script</h2>
+    <p>Paste this whole thing. It sends a hello, streams events out, and listens for commands coming back from the <a class="inline" href="#/bf-tips" data-link>Live Console</a>.</p>
+    ${code('lua', `<span class="tok-com">-- ============================================================
+--  Yesp Bridge — Battlefeuer S2  <->  website
+--  Paste into a server Script. Requires HttpService enabled.
+-- ============================================================</span>
+<span class="tok-key">local</span> HttpService = game:GetService(<span class="tok-str">"HttpService"</span>)
+<span class="tok-key">local</span> Players     = game:GetService(<span class="tok-str">"Players"</span>)
+
+<span class="tok-key">local</span> ENDPOINT = <span class="tok-str">"http://78.108.218.209:8098"</span>
+<span class="tok-key">local</span> ROOM     = <span class="tok-str">"battlefeuer"</span>          <span class="tok-com">-- channel name</span>
+
+<span class="tok-com">-- send one message out to the website</span>
+<span class="tok-key">local function</span> <span class="tok-fn">say</span>(from, text, data)
+    <span class="tok-key">local</span> ok, err = pcall(<span class="tok-key">function</span>()
+        HttpService:PostAsync(
+            ENDPOINT .. <span class="tok-str">"/api/say"</span>,
+            HttpService:JSONEncode({
+                room = ROOM, from = from, text = text, data = data or {}
+            }),
+            Enum.HttpContentType.ApplicationJson
+        )
+    <span class="tok-key">end</span>)
+    <span class="tok-key">if</span> <span class="tok-key">not</span> ok <span class="tok-key">then</span> warn(<span class="tok-str">"[Yesp] send failed:"</span>, err) <span class="tok-key">end</span>
+<span class="tok-key">end</span>
+
+<span class="tok-com">-- poll the website for commands typed in the Live Console</span>
+<span class="tok-key">local function</span> <span class="tok-fn">poll</span>()
+    <span class="tok-key">local</span> ok, res = pcall(<span class="tok-key">function</span>()
+        <span class="tok-key">return</span> HttpService:GetAsync(ENDPOINT .. <span class="tok-str">"/api/commands?room="</span> .. ROOM)
+    <span class="tok-key">end</span>)
+    <span class="tok-key">if</span> <span class="tok-key">not</span> ok <span class="tok-key">then</span> <span class="tok-key">return</span> {} <span class="tok-key">end</span>
+    <span class="tok-key">local</span> okj, list = pcall(HttpService.JSONDecode, HttpService, res)
+    <span class="tok-key">return</span> okj <span class="tok-key">and</span> list <span class="tok-key">or</span> {}
+<span class="tok-key">end</span>
+
+<span class="tok-com">-- handle a command from the website</span>
+<span class="tok-key">local function</span> <span class="tok-fn">onCommand</span>(cmd)
+    say(<span class="tok-str">"game"</span>, <span class="tok-str">"received command: "</span> .. tostring(cmd.text))
+    <span class="tok-com">-- TODO: react however you like, e.g.:</span>
+    <span class="tok-key">if</span> cmd.text == <span class="tok-str">"ping"</span> <span class="tok-key">then</span> say(<span class="tok-str">"game"</span>, <span class="tok-str">"pong "</span> .. os.time()) <span class="tok-key">end</span>
+<span class="tok-key">end</span>
+
+<span class="tok-com">-- ---- wire up live game events ----</span>
+say(<span class="tok-str">"game"</span>, <span class="tok-str">"bridge online — Battlefeuer S2"</span>)
+
+Players.PlayerAdded:Connect(<span class="tok-key">function</span>(p)
+    say(<span class="tok-str">"game"</span>, p.Name .. <span class="tok-str">" joined"</span>, { players = #Players:GetPlayers() })
+<span class="tok-key">end</span>)
+Players.PlayerRemoving:Connect(<span class="tok-key">function</span>(p)
+    say(<span class="tok-str">"game"</span>, p.Name .. <span class="tok-str">" left"</span>)
+<span class="tok-key">end</span>)
+
+<span class="tok-com">-- heartbeat + command poll loop</span>
+<span class="tok-key">while</span> task.wait(<span class="tok-num">1</span>) <span class="tok-key">do</span>
+    <span class="tok-key">for</span> _, cmd <span class="tok-key">in</span> ipairs(poll()) <span class="tok-key">do</span> onCommand(cmd) <span class="tok-key">end</span>
+<span class="tok-key">end</span>`)}
+
+    <h2 id="test">3 · Test the link</h2>
     <ol>
-      <li><strong>Stick with your squad.</strong> Lone wolves feed the enemy.</li>
-      <li><strong>Hold angles, don't chase.</strong> Let opponents walk into your crosshair.</li>
-      <li><strong>Reload behind cover</strong> — never in the open.</li>
-      <li><strong>Use the minimap.</strong> Gunfire pings reveal where the fight is.</li>
+      <li>Run the game. You should see <code class="inline-code">bridge online</code> appear on the <a class="inline" href="#/bf-tips" data-link>Live Console</a> page.</li>
+      <li>Type <code class="inline-code">ping</code> in the console and send — the game replies <code class="inline-code">pong</code>.</li>
     </ol>
 
-    <div class="callout info"><span class="ico">💡</span><p>Spend 10 minutes in a private server learning each gun's recoil before you queue ranked.</p></div>
-    ${pager({ href: '/battlefeuer', title: 'Game Overview' }, { href: '/bf-loadout', title: 'Loadouts & Weapons' })}
+    <div class="callout tip"><span class="ico">✅</span><p>No errors but nothing shows up? Make sure <strong>Allow HTTP Requests</strong> is on, and that the script is a <em>server</em> Script (not a LocalScript).</p></div>
+    ${pager({ href: '/battlefeuer', title: 'Bridge Overview' }, { href: '/bf-loadout', title: 'Wonder-Scripts' })}
   `
 },
 
 '/bf-loadout': {
-  section: 'battlefeuer', title: 'Loadouts & Weapons',
+  section: 'battlefeuer', title: 'Wonder-Scripts',
   html: () => `
-    <span class="eyebrow">BATTLEFEUER · COMBAT</span>
-    <h1>Loadouts & Weapons</h1>
-    <p class="lead">Pick a weapon class that matches how you like to fight, then tune the attachments to your range.</p>
+    <span class="eyebrow">BRIDGE · EXPERIMENTS</span>
+    <h1>Wonder-Scripts</h1>
+    <p class="lead">Small, scientific Lua experiments that don't just run in the game — they <em>report</em> to the website so you can watch the data live. Paste any below the bridge script.</p>
 
-    <h2 id="classes">Weapon classes</h2>
-    ${tabs('bfload', [
-      { label: '🔫 Assault Rifles', body: `
-        <p>The all-rounder. Reliable at every range, forgiving recoil, great for holding objectives.</p>
-        <table class="tbl"><tr><th>Stat</th><th>Rating</th></tr>
-        <tr><td>Damage</td><td>★★★★☆</td></tr><tr><td>Range</td><td>★★★★☆</td></tr>
-        <tr><td>Mobility</td><td>★★★☆☆</td></tr><tr><td>Recoil control</td><td>★★★★☆</td></tr></table>
-        <p><strong>Best for:</strong> new players, anchors, anyone who wants one gun for everything.</p>` },
-      { label: '💨 SMGs', body: `
-        <p>Close-quarters monsters. Insane fire rate and mobility, but they fall off hard past mid-range.</p>
-        <table class="tbl"><tr><th>Stat</th><th>Rating</th></tr>
-        <tr><td>Damage</td><td>★★★☆☆</td></tr><tr><td>Range</td><td>★★☆☆☆</td></tr>
-        <tr><td>Mobility</td><td>★★★★★</td></tr><tr><td>Fire rate</td><td>★★★★★</td></tr></table>
-        <p><strong>Best for:</strong> aggressive flankers and entry fraggers.</p>` },
-      { label: '🎯 Snipers', body: `
-        <p>One shot, one kill — if you can land it. High risk, high reward, and brutal on long sightlines.</p>
-        <table class="tbl"><tr><th>Stat</th><th>Rating</th></tr>
-        <tr><td>Damage</td><td>★★★★★</td></tr><tr><td>Range</td><td>★★★★★</td></tr>
-        <tr><td>Mobility</td><td>★★☆☆☆</td></tr><tr><td>Forgiveness</td><td>★☆☆☆☆</td></tr></table>
-        <div class="callout warn"><span class="ico">⚠️</span><p>Quick-scoping was nerfed in B39.11 — there's now a brief scope-in delay. Pre-aim instead.</p></div>` },
+    ${tabs('wonder', [
+      { label: '📈 Telemetry', body: `
+        <p>Streams each player's position and speed to the site once a second — turn the game into a live sensor.</p>
+        ${code('lua', `<span class="tok-key">local</span> Players = game:GetService(<span class="tok-str">"Players"</span>)
+<span class="tok-key">while</span> task.wait(<span class="tok-num">1</span>) <span class="tok-key">do</span>
+  <span class="tok-key">for</span> _, p <span class="tok-key">in</span> ipairs(Players:GetPlayers()) <span class="tok-key">do</span>
+    <span class="tok-key">local</span> hrp = p.Character <span class="tok-key">and</span> p.Character:FindFirstChild(<span class="tok-str">"HumanoidRootPart"</span>)
+    <span class="tok-key">if</span> hrp <span class="tok-key">then</span>
+      say(<span class="tok-str">"telemetry"</span>, p.Name, {
+        pos   = { math.floor(hrp.Position.X), math.floor(hrp.Position.Y), math.floor(hrp.Position.Z) },
+        speed = math.floor(hrp.AssemblyLinearVelocity.Magnitude)
+      })
+    <span class="tok-key">end</span>
+  <span class="tok-key">end</span>
+<span class="tok-key">end</span>`)}` },
+      { label: '🌡️ Heat Map', body: `
+        <p>A "wonder" experiment: bucket the arena into a grid and count how often players stand in each cell. Send the hottest cell to the site — emergent map knowledge from raw motion.</p>
+        ${code('lua', `<span class="tok-key">local</span> Players = game:GetService(<span class="tok-str">"Players"</span>)
+<span class="tok-key">local</span> heat, CELL = {}, <span class="tok-num">16</span>
+<span class="tok-key">local function</span> <span class="tok-fn">key</span>(v) <span class="tok-key">return</span> math.floor(v.X/CELL)..<span class="tok-str">","</span>..math.floor(v.Z/CELL) <span class="tok-key">end</span>
+<span class="tok-key">while</span> task.wait(<span class="tok-num">0.5</span>) <span class="tok-key">do</span>
+  <span class="tok-key">for</span> _, p <span class="tok-key">in</span> ipairs(Players:GetPlayers()) <span class="tok-key">do</span>
+    <span class="tok-key">local</span> hrp = p.Character <span class="tok-key">and</span> p.Character.PrimaryPart
+    <span class="tok-key">if</span> hrp <span class="tok-key">then</span> <span class="tok-key">local</span> k = key(hrp.Position); heat[k] = (heat[k] <span class="tok-key">or</span> <span class="tok-num">0</span>) + <span class="tok-num">1</span> <span class="tok-key">end</span>
+  <span class="tok-key">end</span>
+  <span class="tok-key">local</span> top, n = <span class="tok-str">"-"</span>, <span class="tok-num">0</span>
+  <span class="tok-key">for</span> k, v <span class="tok-key">in</span> pairs(heat) <span class="tok-key">do</span> <span class="tok-key">if</span> v > n <span class="tok-key">then</span> top, n = k, v <span class="tok-key">end</span> <span class="tok-key">end</span>
+  say(<span class="tok-str">"heatmap"</span>, <span class="tok-str">"hottest cell "</span>..top, { hits = n })
+<span class="tok-key">end</span>`)}` },
+      { label: '🔔 Event Tap', body: `
+        <p>Hook any in-game event and echo it out. Here: every time a character dies, the site hears about it instantly.</p>
+        ${code('lua', `<span class="tok-key">local</span> Players = game:GetService(<span class="tok-str">"Players"</span>)
+Players.PlayerAdded:Connect(<span class="tok-key">function</span>(p)
+  p.CharacterAdded:Connect(<span class="tok-key">function</span>(char)
+    <span class="tok-key">local</span> hum = char:WaitForChild(<span class="tok-str">"Humanoid"</span>)
+    hum.Died:Connect(<span class="tok-key">function</span>()
+      say(<span class="tok-str">"event"</span>, p.Name .. <span class="tok-str">" died"</span>, { at = os.time() })
+    <span class="tok-key">end</span>)
+  <span class="tok-key">end</span>)
+<span class="tok-key">end</span>)`)}` },
     ])}
 
-    <h2 id="attachments">Attachment priorities</h2>
-    <ul>
-      <li><strong>Sight</strong> — pick the reticle you can track fastest, not the flashiest.</li>
-      <li><strong>Grip</strong> — vertical grip tames the first-shot kick on ARs.</li>
-      <li><strong>Mag</strong> — extended mags for objective holds; light mags for run-and-gun.</li>
-      <li><strong>Muzzle</strong> — suppressor hides you from the minimap at a small range cost.</li>
-    </ul>
-
-    <h2 id="meta">A balanced starter loadout</h2>
-    ${code('loadout', `<span class="tok-com">// B39.11 "do-everything" kit</span>
-Primary  : <span class="tok-str">Assault Rifle</span>  + red-dot, vertical grip, extended mag
-Secondary: <span class="tok-str">Machine Pistol</span> (panic close-range)
-Tactical : <span class="tok-str">Flashbang</span>      x2
-Lethal   : <span class="tok-str">Frag</span>           x1
-Perk     : <span class="tok-str">Fast Hands</span>     <span class="tok-com">// faster reload + swap</span>`)}
-
-    ${pager({ href: '/bf-getstarted', title: 'Get Started' }, { href: '/bf-maps', title: 'Maps & Modes' })}
+    <div class="callout info"><span class="ico">🔭</span><p>Every one of these reuses the <code class="inline-code">say()</code> function from the bridge script — so the website's <a class="inline" href="#/bf-tips" data-link>Live Console</a> shows it all with zero extra setup.</p></div>
+    ${pager({ href: '/bf-getstarted', title: 'Get the Script' }, { href: '/bf-maps', title: 'Decoder & Converter' })}
   `
 },
 
 '/bf-maps': {
-  section: 'battlefeuer', title: 'Maps & Modes',
+  section: 'battlefeuer', title: 'Decoder & Converter',
   html: () => `
-    <span class="eyebrow">BATTLEFEUER · MAPS</span>
-    <h1>Maps & Modes</h1>
-    <p class="lead">Know the lanes, own the rotations. Each mode rewards a different rhythm.</p>
+    <span class="eyebrow">BRIDGE · TOOLS</span>
+    <h1>Decoder & Converter</h1>
+    <p class="lead">Translate code three ways: wrap Lua into our custom <strong>WonderScript</strong>, decode WonderScript back to Lua, or convert other-language snippets into Lua. All runs live in your browser.</p>
 
-    <h2 id="modes">Game modes</h2>
-    <div class="card-grid">
-      <div class="card"><div class="card-icon">🚩</div><h4>Frontline</h4><p>Push a moving objective across the map. Constant pressure, no camping.</p></div>
-      <div class="card"><div class="card-icon">💣</div><h4>Demolition</h4><p>Plant or defuse. One life per round — communication wins.</p></div>
-      <div class="card"><div class="card-icon">☠️</div><h4>Team Deathmatch</h4><p>Pure fragging. Best warmup before ranked.</p></div>
-      <div class="card"><div class="card-icon">👑</div><h4>King of the Hill</h4><p>Hold the zone. Crossfire setups are everything.</p></div>
+    <h2 id="tool">The converter</h2>
+    <div class="conv">
+      <div class="conv-bar">
+        <label>Mode</label>
+        <select id="conv-mode">
+          <option value="lua2wonder">Lua → WonderScript (encode)</option>
+          <option value="wonder2lua">WonderScript → Lua (decode)</option>
+          <option value="other2lua">Other (JS / Python-ish) → Lua</option>
+        </select>
+        <button class="conv-run" id="conv-run">Convert ▸</button>
+        <button class="conv-copy" id="conv-copy">Copy output</button>
+      </div>
+      <div class="conv-io">
+        <textarea id="conv-in" spellcheck="false" placeholder="paste code here…">local function greet(name)
+  print("hello " .. name)
+end
+greet("world")</textarea>
+        <textarea id="conv-out" spellcheck="false" placeholder="output appears here…" readonly></textarea>
+      </div>
     </div>
 
-    <h2 id="reading">Reading a map</h2>
-    ${accordion([
-      { ico: '🧭', title: 'Lanes & sightlines', body: '<p>Every map has three rough lanes: <strong>left flank, mid, right flank</strong>. Mid is the fastest but the most exposed. Learn which lane each mode funnels you into and pre-aim the common angles.</p>' },
-      { ico: '🔄', title: 'Rotations', body: '<p>A rotation is moving from one objective/area to another. Good players rotate <em>early and quiet</em> — using suppressed weapons and avoiding mid — to hit the enemy from an unexpected side.</p>' },
-      { ico: '📦', title: 'Cover types', body: '<p><strong>Hard cover</strong> blocks bullets (walls, crates). <strong>Soft cover</strong> only blocks line of sight (smoke, bushes). Never treat soft cover as safety — it just buys a second.</p>' },
-      { ico: '🔊', title: 'Sound cues', body: '<p>Footsteps, reloads, and ability sounds are directional. Wear headphones. A reload sound is your cue to push.</p>' },
-    ])}
+    <h2 id="what-is">What is WonderScript?</h2>
+    <p>WonderScript is a tiny, reversible re-skin of Lua: every Lua keyword is swapped for a unique glyph, so the logic is intact but the source reads like an alien artifact. Decode it and you get byte-for-byte Lua back. Great for puzzles, light obfuscation, or just for fun.</p>
+    ${code('text', `<span class="tok-com">-- Lua</span>
+local x = 10
+<span class="tok-com">-- becomes WonderScript</span>
+✦ x = 10        <span class="tok-com">(local → ✦)</span>`)}
 
-    <div class="callout tip"><span class="ico">🎧</span><p>Run a private match and walk every lane once with sound on. You'll learn the map faster than from 20 live games.</p></div>
-    ${pager({ href: '/bf-loadout', title: 'Loadouts & Weapons' }, { href: '/bf-tips', title: 'Pro Tips' })}
+    <h2 id="other">"Other → Lua" notes</h2>
+    <p>The <strong>Other → Lua</strong> mode is a best-effort line translator for simple snippets. It handles the common stuff:</p>
+    <table class="tbl">
+      <tr><th>From (JS / Python-ish)</th><th>To (Lua)</th></tr>
+      <tr><td><code class="inline-code">let</code> / <code class="inline-code">const</code> / <code class="inline-code">var x = …</code></td><td><code class="inline-code">local x = …</code></td></tr>
+      <tr><td><code class="inline-code">console.log(…)</code></td><td><code class="inline-code">print(…)</code></td></tr>
+      <tr><td><code class="inline-code">function f(a) {</code> … <code class="inline-code">}</code></td><td><code class="inline-code">function f(a)</code> … <code class="inline-code">end</code></td></tr>
+      <tr><td><code class="inline-code">//</code> comment</td><td><code class="inline-code">--</code> comment</td></tr>
+      <tr><td><code class="inline-code">!=</code> · <code class="inline-code">&&</code> · <code class="inline-code">||</code> · <code class="inline-code">!x</code></td><td><code class="inline-code">~=</code> · <code class="inline-code">and</code> · <code class="inline-code">or</code> · <code class="inline-code">not x</code></td></tr>
+    </table>
+    <div class="callout warn"><span class="ico">🧪</span><p>It's a helper, not a full transpiler — always eyeball the output before pasting it into the game.</p></div>
+    ${pager({ href: '/bf-loadout', title: 'Wonder-Scripts' }, { href: '/bf-tips', title: 'Live Console' })}
   `
 },
 
 '/bf-tips': {
-  section: 'battlefeuer', title: 'Pro Tips',
+  section: 'battlefeuer', title: 'Live Console',
   html: () => `
-    <span class="eyebrow">BATTLEFEUER · MASTERY</span>
-    <h1>Pro Tips</h1>
-    <p class="lead">The habits that separate a good player from a great one. Expand each card.</p>
+    <span class="eyebrow">BRIDGE · LIVE</span>
+    <h1>Live Console</h1>
+    <p class="lead">Messages from the game land here in real time, and anything you send goes straight back to the running Lua script. This is the other end of the radio.</p>
 
-    ${accordion([
-      { ico: '🎯', title: 'Pre-aim every corner', body: '<p>Hold your crosshair at head height where an enemy will appear, <em>before</em> you peek. When they pop out you only need to click, not flick. This single habit wins more duels than raw aim.</p>' },
-      { ico: '🏃', title: 'Master the slide-cancel', body: '<p>Sprint → crouch (slide) → jump cancels the slide into a fast, unpredictable peek. It throws off enemy tracking and lets you re-aim mid-slide. Practice until it\'s muscle memory.</p>' },
-      { ico: '👀', title: 'Use peeker\'s advantage', body: '<p>The player peeking sees the holder a few frames before the holder reacts. <strong>Jiggle-peek</strong> wide angles: tap out, bait the shot, then commit when you know where they are.</p>' },
-      { ico: '🔇', title: 'Play the audio game', body: '<p>Stop sprinting near contested areas — walk to stay silent. Listen for enemy reloads and footsteps, then punish. Silence is information; give the enemy none.</p>' },
-      { ico: '🧠', title: 'Trade, don\'t chase', body: '<p>If a teammate dies, you should already be aimed at the spot that killed them — ready to trade. Chasing a low-HP enemy into the open is how you feed.</p>' },
-      { ico: '🔧', title: 'Tune your sensitivity', body: '<p>Lower sens = steadier aim, higher sens = faster flicks. Find the lowest sens where you can still do a 180. Then never change it — consistency beats theory.</p>' },
-      { ico: '🧘', title: 'Reset after deaths', body: '<p>Tilt loses games. After a bad death, take one breath, play the next round slow and safe, and let your aim come back. Calm players close out rounds.</p>' },
-    ])}
+    <div class="console">
+      <div class="console-head">
+        <span class="dot" id="console-dot"></span>
+        <span id="console-status">connecting…</span>
+        <span class="console-room">room: battlefeuer</span>
+        <button class="console-clear" id="console-clear">Clear</button>
+      </div>
+      <div class="console-feed" id="console-feed"></div>
+      <div class="console-send">
+        <input id="console-input" placeholder="type a command (e.g. ping) and press Enter…" autocomplete="off" />
+        <button id="console-go">Send ▸</button>
+      </div>
+    </div>
 
-    <div class="callout info"><span class="ico">⭐</span><p>Pick <strong>one</strong> tip per session and focus only on it. Stacking habits one at a time sticks far better than trying all seven at once.</p></div>
-    ${pager({ href: '/bf-maps', title: 'Maps & Modes' }, { href: '/quantum', title: 'Quantum Lab' })}
+    <div class="callout info"><span class="ico">📡</span><p>This page polls <code class="inline-code">/api/messages</code> every second and posts to <code class="inline-code">/api/cmd</code>. Both are served by the bridge API inside <code class="inline-code">server.js</code> — no third-party backend.</p></div>
+
+    <h2 id="protocol">The wire protocol</h2>
+    <p>Everything is small JSON. Game → site:</p>
+    ${code('json', `POST /api/say
+{ "room": "battlefeuer", "from": "game", "text": "Alex joined", "data": { "players": 7 } }`)}
+    <p>Site → game (the script polls this and clears it after reading):</p>
+    ${code('json', `GET  /api/commands?room=battlefeuer   ->  [ { "text": "ping", "ts": 1718… } ]
+POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
+
+    ${pager({ href: '/bf-maps', title: 'Decoder & Converter' }, { href: '/quantum', title: 'Quantum Lab' })}
   `
 },
 

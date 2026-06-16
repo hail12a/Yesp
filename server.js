@@ -100,10 +100,73 @@ async function selfUpdate() {
   console.log("[updater] no branch reachable — serving local files.");
 }
 
-/* ---- static file server ---- */
+/* ---- bridge API state (in memory, resets on restart) ---- */
+const rooms = {}; // { room: { messages: [], commands: [] } }
+const room = name => (rooms[name] || (rooms[name] = { messages: [], commands: [] }));
+const CAP = 200; // keep the last N messages per room
+
+function readBody(req) {
+  return new Promise(resolve => {
+    let b = "";
+    req.on("data", c => (b += c));
+    req.on("end", () => { try { resolve(JSON.parse(b || "{}")); } catch (_) { resolve({}); } });
+  });
+}
+
+function sendJSON(res, obj, codeNum = 200) {
+  res.writeHead(codeNum, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Cache-Control": "no-store",
+  });
+  res.end(JSON.stringify(obj));
+}
+
+async function handleApi(req, res, urlPath, query) {
+  if (req.method === "OPTIONS") return sendJSON(res, {});
+  const name = query.get("room") || "default";
+
+  if (urlPath === "/api/say" && req.method === "POST") {
+    const m = await readBody(req);
+    const entry = { from: m.from || "game", text: m.text || "", data: m.data || {}, ts: Date.now() };
+    const r = room(m.room || name);
+    r.messages.push(entry);
+    if (r.messages.length > CAP) r.messages.splice(0, r.messages.length - CAP);
+    return sendJSON(res, { ok: true });
+  }
+  if (urlPath === "/api/messages" && req.method === "GET") {
+    return sendJSON(res, room(name).messages);
+  }
+  if (urlPath === "/api/cmd" && req.method === "POST") {
+    const m = await readBody(req);
+    room(m.room || name).commands.push({ text: m.text || "", ts: Date.now() });
+    return sendJSON(res, { ok: true });
+  }
+  if (urlPath === "/api/commands" && req.method === "GET") {
+    const r = room(name);
+    const pending = r.commands;
+    r.commands = []; // deliver once, then clear
+    return sendJSON(res, pending);
+  }
+  if (urlPath === "/api/clear" && req.method === "POST") {
+    const m = await readBody(req);
+    room(m.room || name).messages = [];
+    return sendJSON(res, { ok: true });
+  }
+  return sendJSON(res, { error: "unknown endpoint" }, 404);
+}
+
+/* ---- static file server (+ bridge API) ---- */
 function startServer() {
   http.createServer((req, res) => {
-    const urlPath = decodeURIComponent(req.url.split("?")[0]);
+    const u = new URL(req.url, "http://localhost");
+    const urlPath = decodeURIComponent(u.pathname);
+
+    // bridge API routes
+    if (urlPath.startsWith("/api/")) return handleApi(req, res, urlPath, u.searchParams);
+
     let filePath = path.join(__dirname, urlPath === "/" ? "index.html" : urlPath);
 
     // keep requests inside the app folder
