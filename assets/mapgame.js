@@ -884,38 +884,38 @@
 
     const d = 0.018, cl = Math.cos((center.lat * Math.PI) / 180);
     const s = center.lat - d, n = center.lat + d, w = center.lng - d / cl, e = center.lng + d / cl;
-    const tags = `["natural"="wood"],["landuse"="forest"],["landuse"="wood"],["natural"="scrub"]`;
 
-    // Query 1: bbox — finds polygons with at least one node inside ~2km radius
+    const post = (q) => fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) })
+      .then((r) => r.json()).then((j) => j.elements || []).catch(() => []);
+
+    // Query 1: bbox — catches all polygons with at least one node in ~2km radius
     const qBbox = `[out:json][timeout:35];(` +
       `way["natural"="wood"](${s},${w},${n},${e});way["landuse"="forest"](${s},${w},${n},${e});` +
       `way["landuse"="wood"](${s},${w},${n},${e});way["natural"="scrub"](${s},${w},${n},${e});` +
       `relation["natural"="wood"](${s},${w},${n},${e});relation["landuse"="forest"](${s},${w},${n},${e});` +
       `relation["landuse"="wood"](${s},${w},${n},${e}););out geom;`;
 
-    // Query 2: is_in — finds any forest area that CONTAINS the player's position
-    // (handles huge polygons whose nodes are all outside the bbox above)
-    const qIsIn = `[out:json][timeout:20];is_in(${center.lat},${center.lng})->.a;` +
-      `(way["natural"="wood"](pivot.a);way["landuse"="forest"](pivot.a);` +
-      `way["landuse"="wood"](pivot.a);way["natural"="scrub"](pivot.a);` +
-      `relation["natural"="wood"](pivot.a);relation["landuse"="forest"](pivot.a);` +
-      `relation["landuse"="wood"](pivot.a););out geom;`;
+    // Query 2: is_in — catches huge forest polygons whose nodes are ALL outside the bbox
+    // (the player is inside them but no node falls in our 2km window)
+    const qIsIn = `[out:json][timeout:20];` +
+      `is_in(${center.lat},${center.lng})->.a;` +
+      `(way(pivot.a)["natural"="wood"];way(pivot.a)["landuse"="forest"];` +
+      `way(pivot.a)["landuse"="wood"];way(pivot.a)["natural"="scrub"];` +
+      `relation(pivot.a)["natural"="wood"];relation(pivot.a)["landuse"="forest"];` +
+      `relation(pivot.a)["landuse"="wood"];);out geom;`;
 
-    try {
-      const post = (q) => fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
-      const [r1, r2] = await Promise.all([post(qBbox), post(qIsIn)]);
-      const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
+    // Run both independently — one failing won't kill the other
+    const [els1, els2] = await Promise.all([post(qBbox), post(qIsIn)]);
 
-      const seenId = new Set();
-      const polys = [
-        ...parseForestElements(d1.elements, seenId),
-        ...parseForestElements(d2.elements, seenId),
-      ];
+    const seenId = new Set();
+    const polys = [
+      ...parseForestElements(els1, seenId),
+      ...parseForestElements(els2, seenId),
+    ];
 
-      G.forests = polys; G.forestCenter = { ...center }; G.forestLast = Date.now();
-      generateTrees(center);
-      drawTrees();
-    } catch (e) {}
+    G.forests = polys; G.forestCenter = { ...center }; G.forestLast = Date.now();
+    generateTrees(center);
+    drawTrees();
     G.forestFetching = false;
   }
 
