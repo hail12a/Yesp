@@ -194,17 +194,34 @@
   /* ================================================================
      FURNITURE  —  wall-hugging, door-gap-aware, region-styled
      ================================================================ */
-  const GAP_CLEAR = 1.0;
+  const GAP_CLEAR = 0.55; // clearance on each side of doorframe centre
 
   function doorBlocked(fx, fy, fw, fh, gaps) {
     for (const g of gaps) {
       if (g.vert) {
-        if (fx < g.cx + 0.9 && fx + fw > g.cx - 0.9 && fy < g.cy + DOOR_W / 2 + GAP_CLEAR && fy + fh > g.cy - DOOR_W / 2 - GAP_CLEAR) return true;
+        if (fx < g.cx + 0.85 && fx + fw > g.cx - 0.85 && fy < g.cy + DOOR_W / 2 + GAP_CLEAR && fy + fh > g.cy - DOOR_W / 2 - GAP_CLEAR) return true;
       } else {
-        if (fx < g.cx + DOOR_W / 2 + GAP_CLEAR && fx + fw > g.cx - DOOR_W / 2 - GAP_CLEAR && fy < g.cy + 0.9 && fy + fh > g.cy - 0.9) return true;
+        if (fx < g.cx + DOOR_W / 2 + GAP_CLEAR && fx + fw > g.cx - DOOR_W / 2 - GAP_CLEAR && fy < g.cy + 0.85 && fy + fh > g.cy - 0.85) return true;
       }
     }
     return false;
+  }
+
+  // Only pass gaps that are on walls bounding this specific room.
+  // Gaps on OTHER rooms' walls have identical coordinates in global space and
+  // would incorrectly block furniture that happens to share an x or y value.
+  function roomGaps(room, allGaps) {
+    const { x: rx, y: ry, w: rw, h: rh } = room;
+    const tol = WALL_TH + 0.15;
+    return allGaps.filter(g => {
+      if (g.vert) {
+        return g.cy >= ry - tol && g.cy <= ry + rh + tol &&
+               (Math.abs(g.cx - rx) < tol || Math.abs(g.cx - (rx + rw)) < tol);
+      } else {
+        return g.cx >= rx - tol && g.cx <= rx + rw + tol &&
+               (Math.abs(g.cy - ry) < tol || Math.abs(g.cy - (ry + rh)) < tol);
+      }
+    });
   }
 
   function furnish(room, rnd, out, gaps, style) {
@@ -441,20 +458,16 @@
 
     } else {
       // ──── E/W entry ───────────────────────────────────────────────
-      const vorW = (tpl === 1) ? 0 : clamp(rnd.range(2.0, 2.6), 1.8, W * 0.20);
+      // Vorraum as a full-height strip looks like a corridor — skip it for E/W.
+      // Instead use the same simple zone split (entry side = day, far = night).
+      const vorW = 0;
       const rem     = W - vorW;
-      const dayFrac = (tpl === 0) ? rnd.range(0.44, 0.54) : rnd.range(0.44, 0.58);
+      const dayFrac = rnd.range(0.44, 0.58);
       const dayW    = clamp(rem * dayFrac, 3.8, rem - 3.2);
       const nightW  = rem - dayW;
 
-      const eBase   = entryLow ? 0 : W - vorW;
-      const dayBase = entryLow ? vorW : nightW;
-      const ngtBase = entryLow ? vorW + dayW : 0;
-
-      if (vorW > 0) {
-        rooms.push({ x: eBase, y: 0, w: vorW, h: H, type: 'Entrance' });
-        zGap(true, entryLow ? vorW : W - vorW, 0, H, rnd);
-      }
+      const dayBase = entryLow ? 0 : nightW;
+      const ngtBase = entryLow ? dayW : 0;
 
       if (tpl === 1) {
         rooms.push({ x: dayBase, y: 0, w: dayW, h: H, type: 'Living Room' });
@@ -467,7 +480,7 @@
         zGap(false, kitB ? kH : H - kH, dayBase, dayBase + dayW, rnd);
       }
 
-      zGap(true, entryLow ? vorW + dayW : nightW, 0, H, rnd);
+      zGap(true, entryLow ? dayW : nightW, 0, H, rnd);
 
       const bathH = clamp(rnd.range(2.1, 2.75), 2.0, H * 0.30);
       const batB  = rnd.chance(0.5);
@@ -485,7 +498,7 @@
       }
     }
 
-    for (const r of rooms) { r.area = r.w * r.h; r.color = floorColor(r.type, style); furnish(r, rnd, furniture, gaps, style); }
+    for (const r of rooms) { r.area = r.w * r.h; r.color = floorColor(r.type, style); furnish(r, rnd, furniture, roomGaps(r, gaps), style); }
 
     const lr = rooms.find(r => r.type === 'Living Room');
     const spawn = lr ? { x: lr.x + lr.w / 2, y: lr.y + lr.h / 2 } : innerSpawn(entry, W, H, walls);
