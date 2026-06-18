@@ -195,6 +195,7 @@
     G.onKey = (e) => {
       const k = e.key.toLowerCase();
       if (k === 'e') { primaryAction(); return; }
+      if (k === 'f' && G.inside) { G.inside.interact(); return; }
       if ((G.mode === 'walk' || G.inside) && ['w', 'a', 's', 'd', 'shift', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
         G.keys[k] = true; G.walkTarget = null;
       }
@@ -296,7 +297,7 @@
      or enter/leave the car. Priority: inside > doorway > car. */
   function primaryAction() {
     if (!G || !G.playing) return;
-    if (G.inside) { G.inside.interact(); return; }
+    if (G.inside) { exitBuilding(); return; }   // E always exits the building
     if (G.mode === 'walk' && G.nearDoor) { enterBuilding(G.nearDoor); return; }
     toggleMode();
   }
@@ -322,9 +323,9 @@
     $('#mg-interior').hidden = false;
     hideDoors();
     $('#mg-mode').textContent = '🏠 ' + session.title();
-    $('#mg-toggle').textContent = '🚪 Use door (E)';
-    $('#mg-hint').textContent = TOUCH ? 'Joystick to walk · doors open on contact · EXIT leaves · tap T to use a door.'
-                                      : 'WASD to walk · Shift to run · walk into doors · reach EXIT to leave · E to use a door.';
+    $('#mg-toggle').textContent = '🚪 Leave building (E)';
+    $('#mg-hint').textContent = TOUCH ? 'Joystick to walk · approach a door · tap T to open · T also exits.'
+                                      : 'WASD · Shift to run · approach a door → press F to open · E to exit building.';
     if (TOUCH) { $('#mg-joy').hidden = false; $('#mg-action').hidden = false; $('#mg-action').textContent = 'Exit (T)'; }
     sizeInterior(true);
   }
@@ -767,7 +768,7 @@
   function updateAction() {
     const a = $('#mg-action');
     if (!TOUCH) return;
-    if (G.inside) { a.disabled = false; a.textContent = 'Use door (T)'; return; }
+    if (G.inside) { a.disabled = false; a.textContent = 'Exit building (T)'; return; }
     if (G.mode === 'walk') {
       if (G.nearDoor) { a.disabled = false; a.textContent = 'Enter building (T)'; return; }
       const near = haversine(G.pos, G.carPos) <= 10;

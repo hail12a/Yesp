@@ -1,77 +1,18 @@
-/* =========================================================
-   interiors.js — procedural building interiors for Map Drive
-   ---------------------------------------------------------
-   Walk up to ANY building on Earth, step through its one real
-   doorway, and explore a generated interior — Project-Zomboid
-   style, top-down.
-
-   What decides the layout?  The building's REAL identity.
-   ------------------------------------------------------------
-   Every footprint we pull from OpenStreetMap carries tags that
-   describe what the building actually is:
-       building = house | apartments | hotel | office | retail …
-       building:levels = 8
-       shop = supermarket,  amenity = …,  name = "…"
-   That tag set is the "street map" that tells the generator what
-   to build, so a house becomes a house and an apartment block
-   becomes a corridor lined with flats.
-
-   Archetypes
-   ------------------------------------------------------------
-   • house      → a single home: BSP-split rooms (entrance, living
-                  room, bedrooms, kitchen, bathroom …) sized to the
-                  footprint.
-   • apartments → enter into a HALLWAY. The block is split into N
-                  sections along its long axis; the hallway runs
-                  down the middle (units both sides) or along one
-                  side (units opposite). Each section has a numbered
-                  door — walk to it to enter that unit, which is its
-                  own generated apartment of rooms. Step back out to
-                  the hallway, or out of the hallway to the street.
-   • hotel      → same hallway machinery, doors are "Room N".
-   • office     → same hallway machinery, doors are "Office N".
-   • shop       → one open retail floor with shelving + a counter.
-
-   "Saved into a database"
-   ------------------------------------------------------------
-   Generation is fully DETERMINISTIC: every interior (and every
-   unit inside it) is a pure function of the building's stable id
-   (rounded centroid + size) plus the archetype. The same building
-   — and the same flat within it — always generates identically,
-   so it is effectively saved forever with zero storage. We also
-   cache plans in memory and log visited ids to localStorage.
-
-   Public API
-   ------------------------------------------------------------
-     Interiors.ensureEntry(building)
-         Computes + caches the single doorway, size, stable id and
-         archetype:  building._entry, _W, _H, _id, _kind, _info.
-     Interiors.describe(building)   -> short human label for the map
-     Interiors.openSession(building, userName)
-         A live, nestable interior session:
-           session.step(dt, input) -> { exited:Boolean }
-           session.render(canvas)
-           session.interact()      -> use the nearest door (E / T)
-           session.title()         -> current room/scene label
-   ========================================================= */
+/* ================================================================
+   INTERIORS.JS  —  procedural interior generator for Yesp Map Drive
+   ================================================================ */
 (function () {
   'use strict';
 
-  // ---- constants (metres) ----------------------------------
-  const EARTH      = 111320;
-  const WALL_TH    = 0.16;
-  const DOOR_W     = 1.15;
-  const PLAYER_R   = 0.26;
-  const MIN_ROOM   = 2.6;
-  const SPLIT_STOP = 7.2;
-  const MAX_DEPTH  = 6;
-  const MIN_SIDE   = 4;
-  const MAX_SIDE   = 170;
+  const EARTH    = 111320;
+  const WALL_TH  = 0.14;
+  const DOOR_W   = 1.10;
+  const PLAYER_R = 0.26;
+  const MIN_SIDE = 6;
+  const MAX_SIDE = 200;
   const WALK = 1.7, RUN = 4.6, WACC = 12;
 
-  /* =======================================================
-     1 · DETERMINISTIC RANDOMNESS
-     ======================================================= */
+  /* ---- RNG ---- */
   function hashStr(s) {
     let h = 2166136261 >>> 0;
     for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
@@ -88,31 +29,19 @@
   }
   function rng(seed) {
     const r = mulberry32(seed);
-    return {
-      f: r,
-      range: (lo, hi) => lo + (hi - lo) * r(),
-      int: (lo, hi) => Math.floor(lo + (hi - lo + 1) * r()),
-      pick: (arr) => arr[Math.floor(r() * arr.length) % arr.length],
-      chance: (p) => r() < p,
-    };
+    return { f: r, range: (a, b) => a + (b - a) * r(), int: (a, b) => Math.floor(a + (b - a + 1) * r()), pick: (arr) => arr[Math.floor(r() * arr.length) % arr.length], chance: (p) => r() < p };
   }
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
-  /* =======================================================
-     2 · GEOMETRY: identity, size, doorway, archetype
-     ======================================================= */
+  /* ---- geometry helpers ---- */
   function centroid(pts) {
     let a = 0, cx = 0, cy = 0;
     for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
       const xi = pts[i].lng, yi = pts[i].lat, xj = pts[j].lng, yj = pts[j].lat;
       const f = xi * yj - xj * yi; a += f; cx += (xi + xj) * f; cy += (yi + yj) * f;
     }
-    if (Math.abs(a) < 1e-12) {
-      let sx = 0, sy = 0; for (const p of pts) { sx += p.lng; sy += p.lat; }
-      return { lng: sx / pts.length, lat: sy / pts.length };
-    }
-    a *= 0.5;
-    return { lng: cx / (6 * a), lat: cy / (6 * a) };
+    if (Math.abs(a) < 1e-12) { let sx = 0, sy = 0; for (const p of pts) { sx += p.lng; sy += p.lat; } return { lng: sx / pts.length, lat: sy / pts.length }; }
+    a *= 0.5; return { lng: cx / (6 * a), lat: cy / (6 * a) };
   }
   function metresPerLng(lat) { return EARTH * Math.cos((lat * Math.PI) / 180); }
 
@@ -120,8 +49,7 @@
     let best = null, bestScore = -1;
     for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
       const ax = pts[j].lng, ay = pts[j].lat, bx = pts[i].lng, by = pts[i].lat;
-      const dxm = (bx - ax) * mLng, dym = (by - ay) * EARTH;
-      const len = Math.hypot(dxm, dym);
+      const dxm = (bx - ax) * mLng, dym = (by - ay) * EARTH, len = Math.hypot(dxm, dym);
       if (len < 1.4) continue;
       const mx = (ax + bx) / 2, my = (ay + by) / 2;
       let nx = dym, ny = -dxm; const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
@@ -134,225 +62,89 @@
   }
   function snapToShell(dx, dy, W, H) {
     const cand = [
-      { side: 'S', x: clamp(dx, DOOR_W, W - DOOR_W), y: 0, d: dy },
-      { side: 'N', x: clamp(dx, DOOR_W, W - DOOR_W), y: H, d: H - dy },
-      { side: 'W', x: 0, y: clamp(dy, DOOR_W, H - DOOR_W), d: dx },
-      { side: 'E', x: W, y: clamp(dy, DOOR_W, H - DOOR_W), d: W - dx },
+      { side: 'S', x: clamp(dx, DOOR_W, W - DOOR_W), y: 0,  d: dy },
+      { side: 'N', x: clamp(dx, DOOR_W, W - DOOR_W), y: H,  d: H - dy },
+      { side: 'W', x: 0, y: clamp(dy, DOOR_W, H - DOOR_W),  d: dx },
+      { side: 'E', x: W, y: clamp(dy, DOOR_W, H - DOOR_W),  d: W - dx },
     ];
-    cand.sort((a, b) => a.d - b.d);
-    return cand[0];
+    cand.sort((a, b) => a.d - b.d); return cand[0];
   }
 
-  /* ---- archetype from OSM tags + size ---- */
+  /* ---- archetype classification ---- */
   function classify(tags, W, H) {
-    const area = W * H;
-    const bt = String(tags.building || '').toLowerCase();
+    const area = W * H, bt = String(tags.building || '').toLowerCase();
     const levels = parseInt(tags['building:levels'], 10);
     const looksTall = isFinite(levels) ? levels >= 4 : area > 700;
-
-    if (tags.shop || ['retail', 'commercial', 'supermarket', 'kiosk', 'mall', 'shop'].includes(bt))
-      return 'shop';
+    if (tags.shop || ['retail','commercial','supermarket','kiosk','mall','shop'].includes(bt)) return 'shop';
     if (bt === 'hotel' || tags.tourism === 'hotel' || tags.tourism === 'motel') return 'hotel';
     if (bt === 'office' || tags.office) return 'office';
-    if (['apartments', 'residential', 'dormitory', 'terrace'].includes(bt))
+    if (['apartments','residential','dormitory','terrace'].includes(bt))
       return (bt === 'residential' && !looksTall && area < 380) ? 'house' : 'apartments';
-    if (['house', 'detached', 'bungalow', 'cottage', 'semidetached_house', 'cabin', 'hut', 'farm'].includes(bt))
-      return 'house';
-
-    // no usable tag → fall back to footprint size
+    if (['house','detached','bungalow','cottage','semidetached_house','cabin','hut','farm'].includes(bt)) return 'house';
     if (area > 650 || looksTall) return 'apartments';
     return 'house';
   }
   function buildingTitle(kind, tags, rnd) {
     if (tags && tags.name) return String(tags.name).slice(0, 40);
-    if (kind === 'apartments') return rnd.pick(['Apartment Block', 'Residences', 'Housing Block']);
-    if (kind === 'hotel') return rnd.pick(['Hotel', 'Grand Hotel', 'Inn']);
-    if (kind === 'office') return rnd.pick(['Office Building', 'Business Centre', 'Chambers']);
-    if (kind === 'shop') return rnd.pick(['Corner Shop', 'Market', 'Department Store', 'Supermarket']);
-    return rnd.pick(['House', 'Townhouse', 'Cottage', 'Residence']);
+    if (kind === 'apartments') return rnd.pick(['Apartment Block','Residences','Housing Block']);
+    if (kind === 'hotel') return rnd.pick(['Hotel','Grand Hotel','Inn']);
+    if (kind === 'office') return rnd.pick(['Office Building','Business Centre','Chambers']);
+    if (kind === 'shop') return rnd.pick(['Corner Shop','Market','Department Store']);
+    return rnd.pick(['House','Townhouse','Cottage','Residence']);
   }
   const KIND_ICON = { house: '🏠', apartments: '🏢', hotel: '🏨', office: '🏢', shop: '🏪' };
 
   function ensureEntry(b) {
     if (b._entry) return b._entry;
-    const cen = centroid(b.pts);
-    const mLng = metresPerLng(cen.lat);
+    const cen = centroid(b.pts), mLng = metresPerLng(cen.lat);
     let W = clamp((b.maxLng - b.minLng) * mLng, MIN_SIDE, MAX_SIDE);
     let H = clamp((b.maxLat - b.minLat) * EARTH, MIN_SIDE, MAX_SIDE);
-    const tags = b.tags || {};
-    const kind = classify(tags, W, H);
-
-    const id = 'b' + Math.round(cen.lat * 1e5) + '_' + Math.round(cen.lng * 1e5) +
-               '_' + Math.round(W) + 'x' + Math.round(H) + '_' + kind;
-
+    const tags = b.tags || {}, kind = classify(tags, W, H);
+    const id = 'b' + Math.round(cen.lat * 1e5) + '_' + Math.round(cen.lng * 1e5) + '_' + Math.round(W) + 'x' + Math.round(H) + '_' + kind;
     const edge = chooseDoorEdge(b.pts, cen, mLng);
     let lx, ly, nrmLat, nrmLng;
-    if (edge) {
-      lx = (edge.mx - b.minLng) * mLng; ly = (edge.my - b.minLat) * EARTH;
-      nrmLat = edge.ny / EARTH; nrmLng = edge.nx / mLng;
-    } else { lx = W / 2; ly = 0; nrmLat = -1 / EARTH; nrmLng = 0; }
+    if (edge) { lx = (edge.mx - b.minLng) * mLng; ly = (edge.my - b.minLat) * EARTH; nrmLat = edge.ny / EARTH; nrmLng = edge.nx / mLng; }
+    else { lx = W / 2; ly = 0; nrmLat = -1 / EARTH; nrmLng = 0; }
     const shell = snapToShell(lx, ly, W, H);
-
-    const eLat = b.minLat + shell.y / EARTH;
-    const eLng = b.minLng + shell.x / mLng;
-
-    b._id = id; b._W = W; b._H = H; b._kind = kind;
-    b._info = { tags, title: null }; // title filled lazily in getRootPlan
-    b._entry = {
-      lat: eLat, lng: eLng, x: shell.x, y: shell.y, side: shell.side,
-      out: { lat: nrmLat, lng: nrmLng },
-    };
+    b._id = id; b._W = W; b._H = H; b._kind = kind; b._info = { tags, title: null };
+    b._entry = { lat: b.minLat + shell.y / EARTH, lng: b.minLng + shell.x / mLng, x: shell.x, y: shell.y, side: shell.side, out: { lat: nrmLat, lng: nrmLng } };
     return b._entry;
   }
-
   function describe(b) {
     ensureEntry(b);
     const name = b._info && b._info.tags && b._info.tags.name;
-    return (KIND_ICON[b._kind] || '🏠') + ' ' + (name || prettyKind(b._kind));
-  }
-  function prettyKind(k) {
-    return ({ house: 'House', apartments: 'Apartments', hotel: 'Hotel', office: 'Office', shop: 'Shop' })[k] || 'Building';
+    return (KIND_ICON[b._kind] || '🏠') + ' ' + (name || ({ house:'House',apartments:'Apartments',hotel:'Hotel',office:'Office',shop:'Shop' })[b._kind] || 'Building');
   }
 
-  /* =======================================================
-     3 · SHARED BUILD PRIMITIVES
-     ======================================================= */
+  /* ================================================================
+     WALL / ROOM PRIMITIVES
+     ================================================================ */
   function wallRect(x, y, w, h) { return { x, y, w: Math.max(w, 0), h: Math.max(h, 0) }; }
 
-  function wallWithGap(vertical, fixed, a0, a1, gapAt, walls) {
-    const g0 = gapAt, g1 = gapAt + DOOR_W, half = WALL_TH / 2;
+  // Build a wall segment with a door gap; records gap centre in `gaps` array
+  function gapWall(vertical, fixed, a0, a1, gapAt, walls, gaps) {
+    const g0 = clamp(gapAt, a0 + 0.1, a1 - DOOR_W - 0.1), g1 = g0 + DOOR_W;
+    const half = WALL_TH / 2;
     if (vertical) {
       if (g0 - a0 > 0.02) walls.push(wallRect(fixed - half, a0, WALL_TH, g0 - a0));
       if (a1 - g1 > 0.02) walls.push(wallRect(fixed - half, g1, WALL_TH, a1 - g1));
+      if (gaps) gaps.push({ cx: fixed, cy: (g0 + g1) / 2, vert: true });
     } else {
       if (g0 - a0 > 0.02) walls.push(wallRect(a0, fixed - half, g0 - a0, WALL_TH));
       if (a1 - g1 > 0.02) walls.push(wallRect(g1, fixed - half, a1 - g1, WALL_TH));
+      if (gaps) gaps.push({ cx: (g0 + g1) / 2, cy: fixed, vert: false });
     }
   }
 
-  function perimeterWalls(W, H, entry, walls) {
+  function perimeterWalls(W, H, entry, walls, gaps) {
     const half = WALL_TH / 2;
-    add(false, 0, W, 0, entry && entry.side === 'S' ? entry.x : null);
-    add(false, 0, W, H, entry && entry.side === 'N' ? entry.x : null);
-    add(true, 0, H, 0, entry && entry.side === 'W' ? entry.y : null);
-    add(true, 0, H, W, entry && entry.side === 'E' ? entry.y : null);
-    function add(vertical, a0, a1, fixed, gapCenter) {
-      if (gapCenter == null) {
-        if (vertical) walls.push(wallRect(fixed - half, a0, WALL_TH, a1 - a0));
-        else walls.push(wallRect(a0, fixed - half, a1 - a0, WALL_TH));
-        return;
-      }
-      const g0 = clamp(gapCenter - DOOR_W / 2, a0 + 0.1, a1 - DOOR_W - 0.1);
-      wallWithGap(vertical, fixed, a0, a1, g0, walls);
-    }
-  }
-
-  function splitRegion(R, depth, rnd, walls, rooms) {
-    const { x, y, w, h } = R;
-    const canV = w >= 2 * MIN_ROOM + WALL_TH;
-    const canH = h >= 2 * MIN_ROOM + WALL_TH;
-    const small = w < SPLIT_STOP && h < SPLIT_STOP;
-    if (depth >= MAX_DEPTH || (!canV && !canH) || (small && rnd.chance(0.55))) {
-      rooms.push({ x, y, w, h, area: w * h }); return;
-    }
-    let vertical;
-    if (canV && canH) vertical = (w > h) ? rnd.chance(0.8) : rnd.chance(0.2);
-    else vertical = canV;
-    if (vertical) {
-      const lo = x + MIN_ROOM, hi = x + w - MIN_ROOM;
-      const sx = clamp(rnd.range(lo + (hi - lo) * 0.3, lo + (hi - lo) * 0.7), lo, hi);
-      const gl = y + 0.5, gh = y + h - 0.5 - DOOR_W;
-      const gap = gh > gl ? rnd.range(gl, gh) : y + (h - DOOR_W) / 2;
-      wallWithGap(true, sx, y, y + h, gap, walls);
-      splitRegion({ x, y, w: sx - x, h }, depth + 1, rnd, walls, rooms);
-      splitRegion({ x: sx, y, w: x + w - sx, h }, depth + 1, rnd, walls, rooms);
-    } else {
-      const lo = y + MIN_ROOM, hi = y + h - MIN_ROOM;
-      const sy = clamp(rnd.range(lo + (hi - lo) * 0.3, lo + (hi - lo) * 0.7), lo, hi);
-      const gl = x + 0.5, gh = x + w - 0.5 - DOOR_W;
-      const gap = gh > gl ? rnd.range(gl, gh) : x + (w - DOOR_W) / 2;
-      wallWithGap(false, sy, x, x + w, gap, walls);
-      splitRegion({ x, y: sy, w, h: y + h - sy }, depth + 1, rnd, walls, rooms);
-      splitRegion({ x, y, w, h: sy - y }, depth + 1, rnd, walls, rooms);
-    }
-  }
-
-  /* ---- room typing + furniture ---- */
-  const PALETTE = {
-    Entrance: '#3b3026', 'Living Room': '#5a4632', Bedroom: '#4d3b2a',
-    Kitchen: '#37414a', Bathroom: '#2f4750', Study: '#3c3a30',
-    Storeroom: '#2d2a26', Hallway: '#2b2722', 'Shop floor': '#33302a',
-    Office: '#36352f', generic: '#473a2c',
-  };
-  function floorColor(type) {
-    if (!type) return PALETTE.generic;
-    if (type.startsWith('Bedroom')) return PALETTE.Bedroom;
-    if (type.startsWith('Office')) return PALETTE.Office;
-    return PALETTE[type] || PALETTE.generic;
-  }
-
-  function typeRooms(rooms, entry, rnd) {
-    if (!rooms.length) return;
-    let entRoom = rooms[0], entBest = 1e9;
-    for (const r of rooms) {
-      const inside = entry.x >= r.x && entry.x <= r.x + r.w && entry.y >= r.y && entry.y <= r.y + r.h;
-      const d = Math.hypot(r.x + r.w / 2 - entry.x, r.y + r.h / 2 - entry.y);
-      const score = inside ? -1 : d;
-      if (score < entBest) { entBest = score; entRoom = r; }
-    }
-    entRoom.type = 'Entrance';
-    const rest = rooms.filter((r) => r !== entRoom).sort((a, b) => b.area - a.area);
-    const done = new Set();
-    if (rest[0]) { rest[0].type = 'Living Room'; done.add(rest[0]); }
-    const small = rest.slice().sort((a, b) => a.area - b.area);
-    for (const r of small) if (!done.has(r)) { r.type = 'Bathroom'; done.add(r); break; }
-    for (const r of small) if (!done.has(r)) { r.type = 'Kitchen'; done.add(r); break; }
-    let bed = 1;
-    for (const r of rest) {
-      if (done.has(r)) continue;
-      r.type = r.area > 14 ? ('Bedroom ' + bed++) : (rnd.chance(0.5) ? 'Study' : 'Storeroom');
-      done.add(r);
-    }
-  }
-
-  function furnish(room, rnd, out) {
-    const m = 0.45, ix = room.x + m, iy = room.y + m, iw = room.w - 2 * m, ih = room.h - 2 * m;
-    if (iw < 0.8 || ih < 0.8) return;
-    const cx = room.x + room.w / 2, cy = room.y + room.h / 2, t = room.type || 'Generic';
-    const put = (x, y, w, h, kind, color, solid) => {
-      if (w <= 0 || h <= 0) return;
-      out.push({ x: clamp(x, ix, ix + iw - w), y: clamp(y, iy, iy + ih - h), w: Math.min(w, iw), h: Math.min(h, ih), kind, color, solid: solid !== false });
-    };
-    if (t === 'Living Room') {
-      put(ix, iy, Math.min(2.2, iw), 0.85, 'sofa', '#7d5a3c', true);
-      put(cx - 0.6, cy - 0.35, 1.2, 0.7, 'table', '#9b6b3a', true);
-      put(ix, iy + ih - 0.5, Math.min(1.6, iw), 0.45, 'tv', '#15181c', true);
-      if (iw > 2.4 && ih > 2.4) put(cx - 1.1, cy - 0.9, 2.2, 1.6, 'rug', '#6f4b6a', false);
-    } else if (t.startsWith('Bedroom')) {
-      put(ix, iy, Math.min(2.0, iw), Math.min(1.5, ih), 'bed', '#5b6f86', true);
-      put(ix + Math.min(2.0, iw) + 0.1, iy, 0.5, 0.5, 'nightstand', '#7a5536', true);
-      put(ix + iw - 0.6, iy + ih - 1.4, 0.6, 1.4, 'wardrobe', '#6a4a30', true);
-    } else if (t === 'Kitchen') {
-      put(ix, iy, iw, 0.6, 'counter', '#9aa3ac', true);
-      put(ix, iy + 0.6, 0.6, Math.max(0, ih - 0.6), 'counter', '#9aa3ac', true);
-      put(ix + 0.05, iy + 0.05, 0.5, 0.5, 'stove', '#3a3f45', true);
-      if (iw > 2 && ih > 2) put(cx - 0.5, cy, 1.0, 1.0, 'island', '#7f8893', true);
-    } else if (t === 'Bathroom') {
-      put(ix, iy, 0.7, 0.7, 'toilet', '#dfe7ec', true);
-      put(ix + iw - 1.0, iy, 1.0, 0.6, 'sink', '#cdd6dc', true);
-      if (ih > 1.8) put(ix, iy + ih - 1.7, Math.min(1.7, iw), 0.8, 'tub', '#e7eef2', true);
-    } else if (t === 'Study') {
-      put(ix, iy, Math.min(1.6, iw), 0.7, 'desk', '#6a4a30', true);
-      put(ix + iw - 0.5, iy, 0.5, Math.min(2.2, ih), 'shelf', '#5a3f2a', true);
-    } else if (t === 'Storeroom') {
-      put(ix, iy, 0.6, Math.min(2.5, ih), 'crates', '#5a4a34', true);
-      put(ix + iw - 0.6, iy, 0.6, Math.min(2.5, ih), 'crates', '#5a4a34', true);
-    } else if (t === 'Entrance') {
-      put(ix, iy, 0.5, Math.min(1.4, ih), 'coatrack', '#4a3a2a', true);
-    } else if (t.startsWith('Office')) {
-      put(ix, iy, Math.min(1.6, iw), 0.7, 'desk', '#54585f', true);
-      put(ix, iy + 0.75, 0.55, 0.55, 'chair', '#2c2f34', true);
-      if (iw > 2.6) put(ix + iw - 1.6, iy, 1.6, 0.7, 'desk', '#54585f', true);
+    add(false, 0, W, 0,   entry && entry.side === 'S' ? entry.x : null);
+    add(false, 0, W, H,   entry && entry.side === 'N' ? entry.x : null);
+    add(true,  0, H, 0,   entry && entry.side === 'W' ? entry.y : null);
+    add(true,  0, H, W,   entry && entry.side === 'E' ? entry.y : null);
+    function add(vert, a0, a1, fixed, gc) {
+      if (gc == null) { if (vert) walls.push(wallRect(fixed - half, a0, WALL_TH, a1 - a0)); else walls.push(wallRect(a0, fixed - half, a1 - a0, WALL_TH)); return; }
+      gapWall(vert, fixed, a0, a1, gc - DOOR_W / 2, walls, gaps);
     }
   }
 
@@ -360,446 +152,529 @@
     for (const w of rects) if (x > w.x - r && x < w.x + w.w + r && y > w.y - r && y < w.y + w.h + r) return true;
     return false;
   }
-
   function innerSpawn(entry, W, H, walls) {
     let dx = 0, dy = 0;
-    if (entry.side === 'S') dy = 1.1; else if (entry.side === 'N') dy = -1.1;
-    else if (entry.side === 'W') dx = 1.1; else dx = -1.1;
-    let sx = clamp(entry.x + dx, 0.4, W - 0.4), sy = clamp(entry.y + dy, 0.4, H - 0.4);
-    for (let i = 0; i < 24 && hitRects(sx, sy, walls, PLAYER_R); i++) {
-      sx += (W / 2 - sx) * 0.12; sy += (H / 2 - sy) * 0.12;
-    }
+    if (entry.side === 'S') dy = 1.2; else if (entry.side === 'N') dy = -1.2;
+    else if (entry.side === 'W') dx = 1.2; else dx = -1.2;
+    let sx = clamp(entry.x + dx, 0.5, W - 0.5), sy = clamp(entry.y + dy, 0.5, H - 0.5);
+    for (let i = 0; i < 28 && hitRects(sx, sy, walls, PLAYER_R); i++) { sx += (W / 2 - sx) * 0.12; sy += (H / 2 - sy) * 0.12; }
     return { x: sx, y: sy };
   }
 
-  /* =======================================================
-     4 · ARCHETYPE PLANS
-     -------------------------------------------------------
-     Each returns a plan:
-       { kind, title, W, H, walls[], rooms[], furniture[],
-         portals[], spawn{x,y} }
-     A portal is a door the player can use:
-       { kind:'exit'|'unit', x, y, label, door{…}, fp?, unitEntry? }
-     ======================================================= */
-
-  // ---- HOUSE / single dwelling ----
-  function buildHouse(seed, W, H, entry, opts) {
-    opts = opts || {};
-    const rnd = rng(seed);
-    const walls = [], rooms = [];
-    perimeterWalls(W, H, entry, walls);
-    splitRegion({ x: 0, y: 0, w: W, h: H }, 0, rnd, walls, rooms);
-    typeRooms(rooms, entry, rnd);
-    const furniture = [];
-    for (const r of rooms) { r.color = floorColor(r.type); furnish(r, rnd, furniture); }
-    const spawn = innerSpawn(entry, W, H, walls);
-    const portals = [{ kind: 'exit', x: entry.x, y: entry.y, label: opts.exitLabel || 'EXIT' }];
-    return { kind: 'house', W, H, walls, rooms, furniture, portals, spawn };
+  /* ================================================================
+     FLOOR COLOUR PALETTE  —  warm, realistic apartment look
+     ================================================================ */
+  const FLOOR_CLR = {
+    'Living Room': '#C8A870',  // warm oak parquet
+    'Kitchen':     '#D0CCC2',  // light stone tile
+    'Bathroom':    '#C8D4DC',  // cool porcelain tile
+    'Bedroom':     '#C4A46A',  // parquet (amber)
+    'Entrance':    '#BEB8AE',  // stone entry
+    'Hallway':     '#C6C2BA',  // light corridor tile
+    'Shop floor':  '#C8C4BC',
+    'Office':      '#BAC0C8',
+    'generic':     '#C0B8A8',
+  };
+  function floorColor(type) {
+    if (!type) return FLOOR_CLR.generic;
+    if (type.startsWith('Bedroom')) return FLOOR_CLR.Bedroom;
+    if (type.startsWith('Office') || type.startsWith('Room')) return FLOOR_CLR.Office;
+    return FLOOR_CLR[type] || FLOOR_CLR.generic;
   }
 
-  // ---- SHOP / open retail floor ----
-  function buildShop(seed, W, H, entry) {
+  /* ================================================================
+     FURNITURE  —  wall-hugging only, clears door gaps by GAP_CLEAR m
+     ================================================================ */
+  const GAP_CLEAR = 1.0;
+
+  function doorBlocked(fx, fy, fw, fh, gaps) {
+    for (const g of gaps) {
+      if (g.vert) {
+        if (fx < g.cx + 0.9 && fx + fw > g.cx - 0.9 && fy < g.cy + DOOR_W / 2 + GAP_CLEAR && fy + fh > g.cy - DOOR_W / 2 - GAP_CLEAR) return true;
+      } else {
+        if (fx < g.cx + DOOR_W / 2 + GAP_CLEAR && fx + fw > g.cx - DOOR_W / 2 - GAP_CLEAR && fy < g.cy + 0.9 && fy + fh > g.cy - 0.9) return true;
+      }
+    }
+    return false;
+  }
+
+  function furnish(room, rnd, out, gaps) {
+    const { x: rx, y: ry, w: rw, h: rh, type: t } = room;
+    if (!t) return;
+    const ok = (fx, fy, fw, fh) => fw > 0 && fh > 0 && !doorBlocked(fx, fy, fw, fh, gaps);
+    const push = (fx, fy, fw, fh, kind, color, solid) => { if (ok(fx, fy, fw, fh)) out.push({ x: fx, y: fy, w: fw, h: fh, kind, color, solid: solid !== false }); };
+
+    if (t === 'Kitchen') {
+      // L-shaped counter: along S wall and W wall, near corners
+      const cT = 0.65; // counter depth
+      // South wall counter (full width minus door side margin)
+      push(rx + cT + 0.1, ry + 0.04, rw - cT - 0.2, cT, 'counter', '#9EA8B2', true);
+      // West wall counter arm (runs up from SW corner)
+      const armH = Math.min(rh * 0.50, 2.8);
+      push(rx + 0.04, ry + 0.04, cT, armH, 'counter', '#9EA8B2', true);
+      // Stove inset on south counter
+      push(rx + cT + 0.2, ry + 0.10, 0.75, 0.48, 'stove', '#383E46', true);
+      // Upper wall cabinet (non-solid visual, N wall)
+      const cabW = Math.min(rw * 0.55, 2.2);
+      push(rx + (rw - cabW) / 2, ry + rh - 0.04 - 0.55, cabW, 0.55, 'cabinet', '#8A9098', false);
+
+    } else if (t === 'Bathroom') {
+      // Toilet: NW corner
+      push(rx + 0.04, ry + rh - 0.04 - 0.70, 0.45, 0.70, 'toilet', '#EAF2F6', true);
+      // Sink: NE corner
+      push(rx + rw - 0.04 - 0.55, ry + rh - 0.04 - 0.50, 0.55, 0.50, 'sink', '#D8E6EE', true);
+      // Shower/tub: W wall, lower half
+      if (rw > 1.9 && rh > 2.2) push(rx + 0.04, ry + 0.04, Math.min(0.85, rw * 0.40), Math.min(rh * 0.48, 1.70), 'tub', '#C8DEE8', true);
+
+    } else if (t === 'Entrance') {
+      push(rx + 0.04, ry + 0.04, 0.28, Math.min(rh * 0.45, 1.1), 'coatrack', '#5A4838', true);
+      push(rx + rw - 0.04 - 0.85, ry + 0.04, 0.85, 0.28, 'shoecab', '#6A5040', true);
+
+    } else if (t.startsWith('Bedroom')) {
+      // Bed centred against N wall
+      const bW = Math.min(1.85, rw - 1.0), bH = Math.min(2.05, rh - 0.9);
+      const bX = rx + (rw - bW) / 2;
+      push(bX, ry + rh - 0.04 - bH, bW, bH, 'bed', '#5C6E8A', true);
+      // Nightstand right of bed
+      push(bX + bW + 0.05, ry + rh - 0.04 - 0.48, 0.44, 0.44, 'nightstand', '#7A6045', true);
+      // Wardrobe: NW corner
+      push(rx + 0.04, ry + rh - 0.04 - 0.58, Math.min(1.30, rw * 0.38), 0.58, 'wardrobe', '#6A4A30', true);
+
+    } else if (t === 'Living Room') {
+      // Sofa along S wall, centred
+      const sfW = Math.min(2.6, rw - 1.0), sfH = 0.90;
+      push(rx + (rw - sfW) / 2, ry + 0.04, sfW, sfH, 'sofa', '#8A6A4A', true);
+      // TV on N wall
+      const tvW = Math.min(1.70, rw * 0.48);
+      push(rx + (rw - tvW) / 2, ry + rh - 0.04 - 0.22, tvW, 0.22, 'tv', '#1A1E24', true);
+      // Coffee table (not solid)
+      const tbW = Math.min(1.10, rw * 0.30);
+      out.push({ x: rx + (rw - tbW) / 2, y: ry + 0.04 + sfH + 0.38, w: tbW, h: 0.55, kind: 'table', color: '#9A7050', solid: false });
+      // Rug under table+sofa area
+      out.push({ x: rx + (rw - tbW - 0.7) / 2, y: ry + 0.04 + sfH + 0.10, w: tbW + 0.7, h: 1.0, kind: 'rug', color: '#6A4E7A', solid: false });
+    }
+    // Bedrooms and other rooms left empty per user request (designable later)
+  }
+
+  /* ================================================================
+     ZONE-BASED FLOOR PLAN
+     Day zone (entry side):   Living Room + Kitchen
+     Night zone (far side):   Bedroom(s) + Bathroom
+     ================================================================ */
+  function buildZonedPlan(seed, W, H, entry, opts) {
+    opts = opts || {};
     const rnd = rng(seed);
-    const walls = [], rooms = [], furniture = [];
-    perimeterWalls(W, H, entry, walls);
-    rooms.push({ x: 0, y: 0, w: W, h: H, type: 'Shop floor', color: floorColor('Shop floor') });
-    // checkout counter beside the entrance
+    const walls = [], rooms = [], furniture = [], gaps = [];
+
+    perimeterWalls(W, H, entry, walls, gaps);
+
+    const onNS     = entry.side === 'S' || entry.side === 'N';
+    const entryLow = entry.side === 'S' || entry.side === 'W';
+    const dayFrac  = rnd.range(0.50, 0.60);
+
+    if (onNS) {
+      const splitY  = entryLow ? H * dayFrac : H * (1 - dayFrac);
+      const dayY    = entryLow ? 0 : splitY,  dayH  = entryLow ? splitY : H - splitY;
+      const nightY  = entryLow ? splitY : 0,  nightH = H - dayH;
+
+      // Zone wall
+      const zdX = clamp(rnd.range(W * 0.28, W * 0.72), DOOR_W + 0.3, W - DOOR_W - 0.3);
+      gapWall(false, splitY, 0, W, zdX - DOOR_W / 2, walls, gaps);
+
+      // Day zone — Kitchen left or right, Living Room fills rest
+      const kW = clamp(rnd.range(W * 0.35, W * 0.46), 3.4, W - 3.8);
+      const kitL = rnd.chance(0.5);
+      const kitX = kitL ? 0 : W - kW, livX = kitL ? kW : 0, livW = W - kW;
+      rooms.push({ x: kitX, y: dayY, w: kW, h: dayH, type: 'Kitchen' });
+      rooms.push({ x: livX, y: dayY, w: livW, h: dayH, type: 'Living Room' });
+      gapWall(true, kitL ? kW : W - kW, dayY, dayY + dayH, dayY + dayH * rnd.range(0.35, 0.65) - DOOR_W / 2, walls, gaps);
+
+      // Night zone — Bathroom corner, then 1-2 bedrooms
+      const bathW = clamp(rnd.range(2.3, 2.9), 2.1, W * 0.32);
+      const batL  = rnd.chance(0.5);
+      const bathX = batL ? 0 : W - bathW, bedX = batL ? bathW : 0, bedW = W - bathW;
+      rooms.push({ x: bathX, y: nightY, w: bathW, h: nightH, type: 'Bathroom' });
+      gapWall(true, batL ? bathW : W - bathW, nightY, nightY + nightH, nightY + nightH * rnd.range(0.35, 0.65) - DOOR_W / 2, walls, gaps);
+
+      if (bedW >= 5.8 && nightH >= 3.2) {
+        const b1W = bedW * rnd.range(0.44, 0.56);
+        gapWall(true, bedX + b1W, nightY, nightY + nightH, nightY + nightH * rnd.range(0.35, 0.65) - DOOR_W / 2, walls, gaps);
+        rooms.push({ x: bedX,        y: nightY, w: b1W,        h: nightH, type: 'Bedroom 1' });
+        rooms.push({ x: bedX + b1W,  y: nightY, w: bedW - b1W, h: nightH, type: 'Bedroom 2' });
+      } else {
+        rooms.push({ x: bedX, y: nightY, w: bedW, h: nightH, type: 'Bedroom 1' });
+      }
+
+    } else {
+      // E/W entry: split vertically
+      const splitX  = entryLow ? W * dayFrac : W * (1 - dayFrac);
+      const dayX    = entryLow ? 0 : splitX,  dayW  = entryLow ? splitX : W - splitX;
+      const nightX  = entryLow ? splitX : 0,  nightW = W - dayW;
+
+      const zdY = clamp(rnd.range(H * 0.28, H * 0.72), DOOR_W + 0.3, H - DOOR_W - 0.3);
+      gapWall(true, splitX, 0, H, zdY - DOOR_W / 2, walls, gaps);
+
+      const kH = clamp(rnd.range(H * 0.36, H * 0.48), 3.4, H - 3.8);
+      const kitB = rnd.chance(0.5);
+      const kitY = kitB ? 0 : H - kH, livY = kitB ? kH : 0, livH = H - kH;
+      rooms.push({ x: dayX, y: kitY, w: dayW, h: kH,  type: 'Kitchen' });
+      rooms.push({ x: dayX, y: livY, w: dayW, h: livH, type: 'Living Room' });
+      gapWall(false, kitB ? kH : H - kH, dayX, dayX + dayW, dayX + dayW * rnd.range(0.35, 0.65) - DOOR_W / 2, walls, gaps);
+
+      const bathH = clamp(rnd.range(2.3, 2.9), 2.1, H * 0.32);
+      const batB  = rnd.chance(0.5);
+      const bathY = batB ? 0 : H - bathH, bedY = batB ? bathH : 0, bedH = H - bathH;
+      rooms.push({ x: nightX, y: bathY, w: nightW, h: bathH, type: 'Bathroom' });
+      gapWall(false, batB ? bathH : H - bathH, nightX, nightX + nightW, nightX + nightW * rnd.range(0.35, 0.65) - DOOR_W / 2, walls, gaps);
+
+      if (bedH >= 5.8 && nightW >= 3.2) {
+        const b1H = bedH * rnd.range(0.44, 0.56);
+        gapWall(false, bedY + b1H, nightX, nightX + nightW, nightX + nightW * rnd.range(0.35, 0.65) - DOOR_W / 2, walls, gaps);
+        rooms.push({ x: nightX, y: bedY,        w: nightW, h: b1H,        type: 'Bedroom 1' });
+        rooms.push({ x: nightX, y: bedY + b1H,  w: nightW, h: bedH - b1H, type: 'Bedroom 2' });
+      } else {
+        rooms.push({ x: nightX, y: bedY, w: nightW, h: bedH, type: 'Bedroom 1' });
+      }
+    }
+
+    for (const r of rooms) { r.area = r.w * r.h; r.color = floorColor(r.type); furnish(r, rnd, furniture, gaps); }
+
+    const spawn  = innerSpawn(entry, W, H, walls);
+    const portals = [{ kind: 'exit', x: entry.x, y: entry.y, label: opts.exitLabel || 'EXIT' }];
+    return { W, H, walls, rooms, furniture, portals, spawn, gaps };
+  }
+
+  /* ================================================================
+     ARCHETYPE BUILDERS
+     ================================================================ */
+  function buildHouse(seed, W, H, entry, opts) {
+    const plan = buildZonedPlan(seed, W, H, entry, opts);
+    plan.kind = 'house'; return plan;
+  }
+
+  function buildShop(seed, W, H, entry) {
+    const rnd = rng(seed), walls = [], rooms = [], furniture = [], gaps = [];
+    perimeterWalls(W, H, entry, walls, gaps);
+    rooms.push({ x: 0, y: 0, w: W, h: H, type: 'Shop floor', area: W * H, color: floorColor('Shop floor') });
     const cnLen = Math.min(3.2, W * 0.4);
     if (entry.side === 'S' || entry.side === 'N') {
       const cy = entry.side === 'S' ? 1.4 : H - 2.0;
-      furniture.push({ x: clamp(entry.x + 1.0, 0.5, W - cnLen - 0.5), y: cy, w: cnLen, h: 0.6, kind: 'counter', color: '#8a939c', solid: true });
+      furniture.push({ x: clamp(entry.x + 1.0, 0.5, W - cnLen - 0.5), y: cy, w: cnLen, h: 0.6, kind: 'counter', color: '#8A939C', solid: true });
     } else {
       const cx = entry.side === 'W' ? 1.4 : W - 2.0;
-      furniture.push({ x: cx, y: clamp(entry.y + 1.0, 0.5, H - cnLen - 0.5), w: 0.6, h: cnLen, kind: 'counter', color: '#8a939c', solid: true });
+      furniture.push({ x: cx, y: clamp(entry.y + 1.0, 0.5, H - cnLen - 0.5), w: 0.6, h: cnLen, kind: 'counter', color: '#8A939C', solid: true });
     }
-    // aisles of shelving along the long axis, with a margin from walls
-    const horiz = W >= H;
-    const span = horiz ? H : W, run = horiz ? W : H;
-    const rows = clamp(Math.floor((span - 2.5) / 2.4), 1, 8);
-    const gap = (span - 1.6) / (rows + 1);
+    const horiz = W >= H, span = horiz ? H : W, run = horiz ? W : H;
+    const rows = clamp(Math.floor((span - 2.5) / 2.4), 1, 8), gap = (span - 1.6) / (rows + 1);
     for (let i = 1; i <= rows; i++) {
-      const t = 1.0 + i * gap;
-      const segs = clamp(Math.floor((run - 2.4) / 1.6), 1, 12);
-      const segLen = (run - 2.4) / segs;
+      const t = 1.0 + i * gap, segs = clamp(Math.floor((run - 2.4) / 1.6), 1, 12), segLen = (run - 2.4) / segs;
       for (let s = 0; s < segs; s++) {
-        if (rnd.chance(0.18)) continue; // a break in the aisle to walk through
+        if (rnd.chance(0.18)) continue;
         const u = 1.2 + s * segLen + 0.1;
-        if (horiz) furniture.push({ x: u, y: t - 0.25, w: segLen - 0.4, h: 0.5, kind: 'shelf', color: '#6b5a3c', solid: true });
-        else furniture.push({ x: t - 0.25, y: u, w: 0.5, h: segLen - 0.4, kind: 'shelf', color: '#6b5a3c', solid: true });
+        if (horiz) furniture.push({ x: u, y: t - 0.25, w: segLen - 0.4, h: 0.5, kind: 'shelf', color: '#6B5A3C', solid: true });
+        else furniture.push({ x: t - 0.25, y: u, w: 0.5, h: segLen - 0.4, kind: 'shelf', color: '#6B5A3C', solid: true });
       }
     }
     const spawn = innerSpawn(entry, W, H, walls);
-    const portals = [{ kind: 'exit', x: entry.x, y: entry.y, label: 'EXIT' }];
-    return { kind: 'shop', W, H, walls, rooms, furniture, portals, spawn };
+    return { kind: 'shop', W, H, walls, rooms, furniture, portals: [{ kind: 'exit', x: entry.x, y: entry.y, label: 'EXIT' }], spawn };
   }
 
-  // ---- HALLWAY block (apartments / hotel / office) ----
-  // Splits the footprint into sections along its long axis with a
-  // corridor (central or side); each section is a numbered unit door.
   function buildHallway(seed, W, H, entry, kind) {
-    const rnd = rng(seed);
-    const walls = [], rooms = [], furniture = [], portals = [];
+    const rnd = rng(seed), walls = [], rooms = [], furniture = [], portals = [];
     const unitWord = kind === 'hotel' ? 'Room' : kind === 'office' ? 'Office' : 'Apt';
-
-    const horiz = W >= H;                 // corridor runs along the longer axis
-    const longLen = horiz ? W : H, shortLen = horiz ? H : W;
-    const HW = clamp(shortLen * 0.26, 1.8, 3.0);          // corridor width
-    const unitDepthMin = 3.0;
-    const twoSided = shortLen >= 2 * unitDepthMin + HW;
-
-    // corridor band position along the short axis
-    let c0; // corridor start on short axis
-    if (twoSided) c0 = (shortLen - HW) / 2;
-    else {
-      // single-sided: hug the side nearer the façade door
-      const near = horiz ? entry.y : entry.x;
-      c0 = (near > shortLen / 2) ? (shortLen - HW) : 0;
-    }
+    const horiz = W >= H, longLen = horiz ? W : H, shortLen = horiz ? H : W;
+    const HW = clamp(shortLen * 0.19, 2.2, 2.8);
+    const unitDepthMin = 4.5, twoSided = shortLen >= 2 * unitDepthMin + HW;
+    let c0 = twoSided ? (shortLen - HW) / 2 : ((horiz ? entry.y : entry.x) > shortLen / 2 ? shortLen - HW : 0);
     const c1 = c0 + HW;
-
-    // perimeter (solid all round; the street door is just a portal trigger)
     perimeterWalls(W, H, null, walls);
-
-    // helper to convert (along, cross) → (x,y) for the chosen orientation
-    const XY = (along, cross) => horiz ? { x: along, y: cross } : { x: cross, y: along };
-
-    // corridor floor room
-    const corr = horiz
-      ? { x: 0, y: c0, w: W, h: HW }
-      : { x: c0, y: 0, w: HW, h: H };
-    corr.type = 'Hallway'; corr.color = floorColor('Hallway');
+    const XY = (al, cr) => horiz ? { x: al, y: cr } : { x: cr, y: al };
+    const corr = horiz ? { x: 0, y: c0, w: W, h: HW } : { x: c0, y: 0, w: HW, h: H };
+    corr.type = 'Hallway'; corr.area = corr.w * corr.h; corr.color = floorColor('Hallway');
     rooms.push(corr);
-
-    // sections along the long axis
-    const K = clamp(Math.round(longLen / 5.5), 2, 12);
-    const secLen = longLen / K;
-
-    // which sides hold units
-    const sides = twoSided ? ['low', 'high'] : [(c0 === 0) ? 'high' : 'low'];
-    // 'low'  band: cross in [0, c0]      (below/left of corridor)
-    // 'high' band: cross in [c1, shortLen](above/right of corridor)
-
-    let unitIdx = 0;
+    const K = clamp(Math.round(longLen / 10), 1, 8), secLen = longLen / K;
+    const sides = twoSided ? ['low','high'] : [(c0 === 0) ? 'high' : 'low'];
+    let uid = 0;
     for (const side of sides) {
-      const bandDepth = side === 'low' ? c0 : (shortLen - c1);
-      if (bandDepth < 2.0) continue;
-      const crossBase = side === 'low' ? 0 : c1;           // band start on short axis
-      const doorCross = side === 'low' ? c0 : c1;          // wall line touching corridor
+      const bd = side === 'low' ? c0 : (shortLen - c1);
+      if (bd < 3.0) continue;
+      const cBase = side === 'low' ? 0 : c1, dCross = side === 'low' ? c0 : c1;
       for (let i = 0; i < K; i++) {
-        const a0 = i * secLen, a1 = (i + 1) * secLen;
-        // closed unit block (visual room behind the door)
-        const blk = horiz
-          ? { x: a0, y: crossBase, w: secLen, h: bandDepth }
-          : { x: crossBase, y: a0, w: bandDepth, h: secLen };
-        blk.type = unitWord + ' ' + (unitIdx + 1); blk.closed = true; blk.color = '#1c1813';
+        const a0 = i * secLen;
+        const blk = horiz ? { x: a0, y: cBase, w: secLen, h: bd } : { x: cBase, y: a0, w: bd, h: secLen };
+        blk.type = unitWord + ' ' + (uid + 1); blk.closed = true; blk.color = '#8A8078'; blk.area = blk.w * blk.h;
         rooms.push(blk);
-
-        // door centre on the corridor-facing wall
         const along = a0 + secLen / 2;
-        const doorPt = XY(along, doorCross);
-        // portal sits a touch INSIDE the corridor so you must approach it.
-        // low band is below/left of the corridor → corridor is on the +side;
-        // high band is above/right → corridor is on the -side.
+        const doorPt = XY(along, dCross);
         const inset = side === 'low' ? 0.45 : -0.45;
-        const portalPt = XY(along, doorCross + inset);
-
-        // unit-local entry: the door is on the side facing the corridor
-        const uW = horiz ? secLen : bandDepth;
-        const uH = horiz ? bandDepth : secLen;
-        let uEntry;
-        if (horiz) uEntry = { side: side === 'low' ? 'N' : 'S', x: uW / 2, y: side === 'low' ? uH : 0 };
-        else uEntry = { side: side === 'low' ? 'E' : 'W', x: side === 'low' ? uW : 0, y: uH / 2 };
-
-        portals.push({
-          kind: 'unit', unitIndex: unitIdx, label: unitWord + ' ' + (unitIdx + 1),
-          x: portalPt.x, y: portalPt.y,
-          door: { x: doorPt.x, y: doorPt.y, horiz: horiz }, // door bar spans along the corridor wall
-          fp: { w: uW, h: uH }, unitEntry: uEntry,
-        });
-        unitIdx++;
+        const porPt = XY(along, dCross + inset);
+        const uW = horiz ? secLen : bd, uH = horiz ? bd : secLen;
+        let uE;
+        if (horiz) uE = { side: side === 'low' ? 'N' : 'S', x: uW / 2, y: side === 'low' ? uH : 0 };
+        else       uE = { side: side === 'low' ? 'E' : 'W', x: side === 'low' ? uW : 0, y: uH / 2 };
+        portals.push({ kind: 'unit', unitIndex: uid, label: unitWord + ' ' + (uid + 1), x: porPt.x, y: porPt.y, door: { x: doorPt.x, y: doorPt.y, horiz }, fp: { w: uW, h: uH }, unitEntry: uE });
+        uid++;
       }
     }
-
-    // corridor boundary walls — CONTINUOUS (each unit is its own scene,
-    // so the block stays sealed; the door is a teleport trigger drawn on
-    // the wall, not a physical gap). This keeps you safely in the corridor.
     const half = WALL_TH / 2;
-    for (const side of sides) {
-      const line = side === 'low' ? c0 : c1;
-      if (horiz) walls.push(wallRect(0, line - half, longLen, WALL_TH));
-      else walls.push(wallRect(line - half, 0, WALL_TH, longLen));
-    }
-
-    // street exit portal: nearest corridor end to the façade door
-    const alongEntry = horiz ? entry.x : entry.y;
-    const exitAlong = (alongEntry < longLen / 2) ? 0.6 : longLen - 0.6;
-    const exitPt = XY(exitAlong, c0 + HW / 2);
-    portals.unshift({ kind: 'exit', x: exitPt.x, y: exitPt.y, label: 'EXIT' });
-
-    // a runner rug + plant to dress the corridor
-    const rugPt = XY(longLen / 2, c0 + HW / 2);
-    if (horiz) furniture.push({ x: 0.8, y: rugPt.y - 0.5, w: W - 1.6, h: 1.0, kind: 'rug', color: '#5a3f55', solid: false });
-    else furniture.push({ x: rugPt.x - 0.5, y: 0.8, w: 1.0, h: H - 1.6, kind: 'rug', color: '#5a3f55', solid: false });
-
-    // spawn just inside the street door
-    const spawnAlong = (alongEntry < longLen / 2) ? exitAlong + 1.2 : exitAlong - 1.2;
-    const sp = XY(clamp(spawnAlong, 0.6, longLen - 0.6), c0 + HW / 2);
-
+    for (const side of sides) { const line = side === 'low' ? c0 : c1; if (horiz) walls.push(wallRect(0, line - half, longLen, WALL_TH)); else walls.push(wallRect(line - half, 0, WALL_TH, longLen)); }
+    const aE = horiz ? entry.x : entry.y, exAl = (aE < longLen / 2) ? 0.7 : longLen - 0.7;
+    const exPt = XY(exAl, c0 + HW / 2);
+    portals.unshift({ kind: 'exit', x: exPt.x, y: exPt.y, label: 'EXIT' });
+    if (horiz) furniture.push({ x: 1.2, y: c0 + HW * 0.22, w: W - 2.4, h: HW * 0.55, kind: 'rug', color: '#6A4E7A', solid: false });
+    else       furniture.push({ x: c0 + HW * 0.22, y: 1.2, w: HW * 0.55, h: H - 2.4, kind: 'rug', color: '#6A4E7A', solid: false });
+    const spAl = (aE < longLen / 2) ? exAl + 1.5 : exAl - 1.5;
+    const sp = XY(clamp(spAl, 0.8, longLen - 0.8), c0 + HW / 2);
     return { kind, W, H, walls, rooms, furniture, portals, spawn: { x: sp.x, y: sp.y } };
   }
 
-  /* =======================================================
-     5 · PLAN CACHE  ("the database")
-     ======================================================= */
+  /* ================================================================
+     PLAN CACHE
+     ================================================================ */
   const PLAN_CACHE = new Map();
   function logVisit(id) {
-    try {
-      const seen = JSON.parse(localStorage.getItem('yesp-mg-interiors') || '{}');
-      if (!seen[id]) { seen[id] = Date.now(); localStorage.setItem('yesp-mg-interiors', JSON.stringify(seen)); }
-    } catch (e) {}
+    try { const s = JSON.parse(localStorage.getItem('yesp-mg-interiors') || '{}'); if (!s[id]) { s[id] = Date.now(); localStorage.setItem('yesp-mg-interiors', JSON.stringify(s)); } } catch (e) {}
   }
 
   function getRootPlan(b) {
     ensureEntry(b);
     if (PLAN_CACHE.has(b._id)) return PLAN_CACHE.get(b._id);
-    const seed = hashStr(b._id);
-    const rnd = rng(seed ^ 0x9e3779b9);
-    const title = buildingTitle(b._kind, b._info.tags, rnd);
+    const seed = hashStr(b._id), rnd = rng(seed ^ 0x9e3779b9), title = buildingTitle(b._kind, b._info.tags, rnd);
     let plan;
     if (b._kind === 'shop') plan = buildShop(seed, b._W, b._H, b._entry);
-    else if (b._kind === 'apartments' || b._kind === 'hotel' || b._kind === 'office')
-      plan = buildHallway(seed, b._W, b._H, b._entry, b._kind);
+    else if (['apartments','hotel','office'].includes(b._kind)) plan = buildHallway(seed, b._W, b._H, b._entry, b._kind);
     else plan = buildHouse(seed, b._W, b._H, b._entry);
-    plan.title = title;
-    PLAN_CACHE.set(b._id, plan);
-    logVisit(b._id);
-    return plan;
+    plan.title = title; PLAN_CACHE.set(b._id, plan); logVisit(b._id); return plan;
   }
 
-  // a unit (flat / hotel room / office) inside a hallway block
+  // Apartment unit: always a generous Vienna-sized flat (13-18 × 10-14 m)
   function getUnitPlan(b, portal) {
     const key = b._id + '#u' + portal.unitIndex;
     if (PLAN_CACHE.has(key)) return PLAN_CACHE.get(key);
-    const seed = hashStr(key);
-    const W = clamp(portal.fp.w, MIN_SIDE, MAX_SIDE);
-    const H = clamp(portal.fp.h, MIN_SIDE, MAX_SIDE);
-    // remap the unit entry onto the clamped shell
+    const seed = hashStr(key), r2 = rng(seed ^ 0x1234);
+    const UW = Math.round(r2.range(13, 18)), UH = Math.round(r2.range(10, 14));
     const e = portal.unitEntry;
-    const entry = {
-      side: e.side,
-      x: clamp(e.x * (W / portal.fp.w), DOOR_W, W - DOOR_W),
-      y: clamp(e.y * (H / portal.fp.h), DOOR_W, H - DOOR_W),
-    };
-    if (e.side === 'S') entry.y = 0; else if (e.side === 'N') entry.y = H;
-    else if (e.side === 'W') entry.x = 0; else entry.x = W;
-    const plan = buildHouse(seed, W, H, entry, { exitLabel: 'EXIT' });
-    plan.title = portal.label;
-    PLAN_CACHE.set(key, plan);
-    logVisit(key);
-    return plan;
+    const entry = { side: e.side, x: 0, y: 0 };
+    if (e.side === 'S') { entry.y = 0; entry.x = clamp(UW / 2, DOOR_W, UW - DOOR_W); }
+    else if (e.side === 'N') { entry.y = UH; entry.x = clamp(UW / 2, DOOR_W, UW - DOOR_W); }
+    else if (e.side === 'W') { entry.x = 0;  entry.y = clamp(UH / 2, DOOR_W, UH - DOOR_W); }
+    else                     { entry.x = UW; entry.y = clamp(UH / 2, DOOR_W, UH - DOOR_W); }
+    const plan = buildHouse(seed, UW, UH, entry, { exitLabel: 'EXIT' });
+    plan.title = portal.label; PLAN_CACHE.set(key, plan); logVisit(key); return plan;
   }
 
-  /* =======================================================
-     6 · LIVE SESSION (nestable scene stack)
-     ======================================================= */
+  /* ================================================================
+     LIVE SESSION  (nestable scene stack)
+     ================================================================ */
   function openSession(b, userName) {
     const user = userName || 'you';
-    const scenes = [];
-    let exited = false;
+    const scenes = []; let exited = false;
 
     function makeScene(plan, fromPortal) {
       const solids = plan.walls.concat(plan.furniture.filter((f) => f.solid));
-      return {
-        plan, solids, fromPortal,
-        px: plan.spawn.x, py: plan.spawn.y, vx: 0, vy: 0, heading: 180,
-        // don't retrigger the door you just arrived through until you step off it
-        cooldown: nearestPortal(plan, plan.spawn.x, plan.spawn.y),
-      };
+      return { plan, solids, fromPortal, px: plan.spawn.x, py: plan.spawn.y, vx: 0, vy: 0, heading: 180, cooldown: nearestPortal(plan, plan.spawn.x, plan.spawn.y) };
     }
     function cur() { return scenes[scenes.length - 1]; }
     function nearestPortal(plan, x, y) {
       let best = null, bd = 1e9;
       for (const p of plan.portals) { const d = Math.hypot(p.x - x, p.y - y); if (d < bd) { bd = d; best = p; } }
-      return (bd < 1.8) ? best : null;
+      return bd < 1.8 ? best : null;
     }
 
-    // root scene
     scenes.push(makeScene(getRootPlan(b), null));
 
     function activate(p) {
-      const s = cur();
-      if (p.kind === 'unit') {
-        const child = makeScene(getUnitPlan(b, p), p);
-        scenes.push(child);
-      } else { // exit
-        if (scenes.length === 1) { exited = true; }
-        else { const leaving = scenes.pop(); cur().cooldown = leaving.fromPortal; }
-      }
+      if (p.kind === 'unit') { scenes.push(makeScene(getUnitPlan(b, p), p)); }
+      else { if (scenes.length === 1) exited = true; else { const leaving = scenes.pop(); cur().cooldown = leaving.fromPortal; } }
     }
 
     function move(dt, input) {
-      const s = cur();
-      const keys = input.keys || {}, joy = input.joy || { active: false, x: 0, y: 0 };
+      const s = cur(), keys = input.keys || {}, joy = input.joy || { active: false, x: 0, y: 0 };
       let dE = 0, dN = 0;
       if (joy.active) { dE = joy.x; dN = joy.y; }
       else {
-        if (keys['w'] || keys['arrowup']) dN += 1;
-        if (keys['s'] || keys['arrowdown']) dN -= 1;
-        if (keys['a'] || keys['arrowleft']) dE -= 1;
+        if (keys['w'] || keys['arrowup'])    dN += 1;
+        if (keys['s'] || keys['arrowdown'])  dN -= 1;
+        if (keys['a'] || keys['arrowleft'])  dE -= 1;
         if (keys['d'] || keys['arrowright']) dE += 1;
       }
       const mag = Math.hypot(dE, dN);
-      let want = joy.active ? WALK + (RUN - WALK) * Math.max(0, (mag - 0.6) / 0.4) : (keys['shift'] ? RUN : WALK);
+      const want = joy.active ? WALK + (RUN - WALK) * Math.max(0, (mag - 0.6) / 0.4) : (keys['shift'] ? RUN : WALK);
       let tvx = 0, tvy = 0;
       if (mag > 1e-6) { tvx = (dE / mag) * want; tvy = (dN / mag) * want; }
-      s.vx += (tvx - s.vx) * Math.min(1, WACC * dt);
-      s.vy += (tvy - s.vy) * Math.min(1, WACC * dt);
+      s.vx += (tvx - s.vx) * Math.min(1, WACC * dt); s.vy += (tvy - s.vy) * Math.min(1, WACC * dt);
       if (Math.hypot(s.vx, s.vy) > 0.05) s.heading = (Math.atan2(s.vx, s.vy) * 180) / Math.PI;
       const hit = (x, y) => hitRects(x, y, s.solids, PLAYER_R);
       let nx = s.px + s.vx * dt; if (!hit(nx, s.py)) s.px = nx; else s.vx = 0;
       let ny = s.py + s.vy * dt; if (!hit(s.px, ny)) s.py = ny; else s.vy = 0;
       s.px = clamp(s.px, PLAYER_R, s.plan.W - PLAYER_R);
       s.py = clamp(s.py, PLAYER_R, s.plan.H - PLAYER_R);
-      // clear the arrival cooldown once we've stepped away from that door
       if (s.cooldown && Math.hypot(s.px - s.cooldown.x, s.py - s.cooldown.y) > 1.7) s.cooldown = null;
     }
 
     function step(dt, input) {
       if (exited) return { exited: true };
       move(dt, input);
-      // auto-use a door you walk onto (tight radius so it's deliberate)
-      const s = cur();
-      if (!s.cooldown) {
-        for (const p of s.plan.portals) {
-          if (Math.hypot(p.x - s.px, p.y - s.py) < 0.95) { activate(p); break; }
-        }
-      }
+      // No auto-activate — player must press F
       return { exited };
     }
 
-    // E / T — use the nearest door within reach
     function interact() {
       if (exited) return;
-      const s = cur();
-      if (s.cooldown) return;
-      let best = null, bd = 1.7;
+      const s = cur(); if (s.cooldown) return;
+      let best = null, bd = 2.2;
       for (const p of s.plan.portals) { const d = Math.hypot(p.x - s.px, p.y - s.py); if (d < bd) { bd = d; best = p; } }
       if (best) activate(best);
     }
 
-    function title() {
-      const s = cur();
-      return s.plan.title || '';
-    }
+    function title() { return scenes[scenes.length - 1]?.plan?.title || ''; }
 
-    /* ---- render the current scene ---- */
+    /* ---- RENDER ---- */
     function render(canvas) {
-      const s = cur();
-      const plan = s.plan;
+      const s = cur(), plan = s.plan;
       const ctx = canvas.getContext('2d');
-      const dpr = canvas._dpr || 1;
-      const vw = canvas.width / dpr, vh = canvas.height / dpr;
+      const dpr = canvas._dpr || 1, vw = canvas.width / dpr, vh = canvas.height / dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      const PXM = clamp(Math.min(vw, vh) / 13, 16, 34);
-      const camX = s.px, camY = s.py;
-      const toX = (mx) => (mx - camX) * PXM + vw / 2;
-      const toY = (my) => vh / 2 - (my - camY) * PXM;
+      const PXM = clamp(Math.min(vw, vh) / 14, 18, 40);
+      const toX = (mx) => (mx - s.px) * PXM + vw / 2;
+      const toY = (my) => vh / 2 - (my - s.py) * PXM;
+      const fam = getComputedStyle(document.body).fontFamily || 'Inter,sans-serif';
 
-      ctx.fillStyle = '#0a0c10'; ctx.fillRect(0, 0, vw, vh);
-      ctx.fillStyle = '#16130f';
-      ctx.fillRect(toX(0) - 6, toY(plan.H) - 6, plan.W * PXM + 12, plan.H * PXM + 12);
+      // Exterior void
+      ctx.fillStyle = '#1C1A16'; ctx.fillRect(0, 0, vw, vh);
+      // Building footprint shadow
+      ctx.fillStyle = '#2E2820';
+      ctx.fillRect(toX(0) - 10, toY(plan.H) - 10, plan.W * PXM + 20, plan.H * PXM + 20);
 
-      // floors
+      // Floor fill per room
       for (const r of plan.rooms) {
+        const rx = toX(r.x), ry = toY(r.y + r.h), rw = r.w * PXM, rh = r.h * PXM;
         if (r.closed) {
-          ctx.fillStyle = r.color || '#1c1813';
-          ctx.fillRect(toX(r.x), toY(r.y + r.h), r.w * PXM, r.h * PXM);
+          // Apartment block door: dark face with label
+          ctx.fillStyle = '#6A6258'; ctx.fillRect(rx, ry, rw, rh);
+          ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '500 10px ' + fam;
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(r.type, rx + rw / 2, ry + rh / 2);
           continue;
         }
-        ctx.fillStyle = r.color || PALETTE.generic;
-        ctx.fillRect(toX(r.x), toY(r.y + r.h), r.w * PXM, r.h * PXM);
-        ctx.strokeStyle = 'rgba(0,0,0,0.10)'; ctx.lineWidth = 1;
-        const stp = (r.type === 'Kitchen' || r.type === 'Bathroom') ? 0.6 : 0.9;
-        for (let gx = r.x; gx < r.x + r.w; gx += stp) {
-          ctx.beginPath(); ctx.moveTo(toX(gx), toY(r.y)); ctx.lineTo(toX(gx), toY(r.y + r.h)); ctx.stroke();
+        // Floor colour
+        ctx.fillStyle = r.color || FLOOR_CLR.generic; ctx.fillRect(rx, ry, rw, rh);
+        // Floor texture lines
+        const isKB = r.type === 'Kitchen' || r.type === 'Bathroom' || r.type === 'Entrance';
+        ctx.strokeStyle = 'rgba(0,0,0,0.06)'; ctx.lineWidth = 1;
+        if (isKB) {
+          // Square tile grid
+          const stp = 0.55;
+          for (let gx = r.x; gx < r.x + r.w; gx += stp) { ctx.beginPath(); ctx.moveTo(toX(gx), ry); ctx.lineTo(toX(gx), ry + rh); ctx.stroke(); }
+          for (let gy = r.y; gy < r.y + r.h; gy += stp) { ctx.beginPath(); ctx.moveTo(rx, toY(gy)); ctx.lineTo(rx + rw, toY(gy)); ctx.stroke(); }
+        } else {
+          // Parquet planks
+          const stp = 0.80;
+          for (let gy = r.y; gy < r.y + r.h; gy += stp) { ctx.beginPath(); ctx.moveTo(rx, toY(gy)); ctx.lineTo(rx + rw, toY(gy)); ctx.stroke(); }
         }
+        // Subtle room border/skirting
+        ctx.strokeStyle = 'rgba(0,0,0,0.08)'; ctx.lineWidth = 2;
+        ctx.strokeRect(rx + 1, ry + 1, rw - 2, rh - 2);
       }
 
-      // room / unit labels
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      const fam = (getComputedStyle(document.body).fontFamily || 'sans-serif');
-      ctx.font = '600 11px ' + fam;
+      // Room labels (faint, understated)
+      ctx.font = '500 9px ' + fam; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       for (const r of plan.rooms) {
-        if (!r.type) continue;
-        ctx.fillStyle = r.closed ? 'rgba(220,225,230,0.5)' : 'rgba(255,255,255,0.32)';
-        ctx.fillText(r.type, toX(r.x + r.w / 2), toY(r.y + r.h / 2));
+        if (!r.type || r.closed) continue;
+        ctx.fillStyle = 'rgba(20,14,8,0.38)';
+        ctx.fillText(r.type.toUpperCase(), toX(r.x + r.w / 2), toY(r.y + r.h / 2));
       }
 
-      // furniture
+      // Furniture
       for (const f of plan.furniture) {
+        const fx = toX(f.x), fy = toY(f.y + f.h), fw = f.w * PXM, fh = f.h * PXM;
         if (f.kind === 'rug') {
-          ctx.globalAlpha = 0.5; ctx.fillStyle = f.color;
-          ctx.fillRect(toX(f.x), toY(f.y + f.h), f.w * PXM, f.h * PXM); ctx.globalAlpha = 1; continue;
+          ctx.globalAlpha = 0.42; ctx.fillStyle = f.color; ctx.fillRect(fx, fy, fw, fh); ctx.globalAlpha = 1; continue;
         }
-        ctx.fillStyle = f.color;
-        ctx.fillRect(toX(f.x), toY(f.y + f.h), f.w * PXM, f.h * PXM);
-        ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1;
-        ctx.strokeRect(toX(f.x), toY(f.y + f.h), f.w * PXM, f.h * PXM);
-        ctx.fillStyle = 'rgba(255,255,255,0.08)';
-        ctx.fillRect(toX(f.x), toY(f.y + f.h), f.w * PXM, Math.min(4, f.h * PXM * 0.3));
+        if (f.kind === 'table') {
+          ctx.globalAlpha = 0.72; ctx.fillStyle = f.color; ctx.fillRect(fx, fy, fw, fh);
+          ctx.strokeStyle = 'rgba(0,0,0,0.28)'; ctx.lineWidth = 1; ctx.strokeRect(fx, fy, fw, fh); ctx.globalAlpha = 1; continue;
+        }
+        if (f.kind === 'cabinet') {
+          ctx.globalAlpha = 0.6; ctx.fillStyle = f.color; ctx.fillRect(fx, fy, fw, fh);
+          ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1; ctx.strokeRect(fx, fy, fw, fh); ctx.globalAlpha = 1; continue;
+        }
+        // Solid furniture
+        ctx.fillStyle = f.color; ctx.fillRect(fx, fy, fw, fh);
+        ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.fillRect(fx, fy, fw, Math.min(5, fh * 0.22));
+        ctx.fillStyle = 'rgba(0,0,0,0.16)'; ctx.fillRect(fx, Math.max(fy, fy + fh - 4), fw, Math.min(4, fh * 0.16));
+        ctx.strokeStyle = 'rgba(0,0,0,0.28)'; ctx.lineWidth = 1; ctx.strokeRect(fx, fy, fw, fh);
       }
 
-      // walls
-      ctx.fillStyle = '#cdd2d8';
-      for (const wl of plan.walls) ctx.fillRect(toX(wl.x), toY(wl.y + wl.h), Math.max(2, wl.w * PXM), Math.max(2, wl.h * PXM));
-      ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = 1;
-      for (const wl of plan.walls) ctx.strokeRect(toX(wl.x), toY(wl.y + wl.h), Math.max(2, wl.w * PXM), Math.max(2, wl.h * PXM));
+      // Walls — light plaster colour
+      for (const wl of plan.walls) {
+        const wx = toX(wl.x), wy = toY(wl.y + wl.h), ww = Math.max(2, wl.w * PXM), wh = Math.max(2, wl.h * PXM);
+        ctx.fillStyle = '#EDEAE2'; ctx.fillRect(wx, wy, ww, wh);
+        ctx.fillStyle = 'rgba(0,0,0,0.10)'; ctx.fillRect(wx, wy + wh - Math.min(3, wh * 0.3), ww, Math.min(3, wh * 0.3));
+        ctx.strokeStyle = 'rgba(100,90,78,0.55)'; ctx.lineWidth = 1; ctx.strokeRect(wx, wy, ww, wh);
+      }
 
-      // portals: unit doors then the green exit
-      let nearest = null, nd = 3.2;
-      for (const p of plan.portals) { const d = Math.hypot(p.x - s.px, p.y - s.py); if (d < nd) { nd = d; nearest = p; } }
-      for (const p of plan.portals) {
-        if (p.kind === 'unit') {
-          const d = p.door, w = d.horiz ? DOOR_W : 0.22, h = d.horiz ? 0.22 : DOOR_W;
-          const hot = (p === nearest);
-          ctx.save();
-          if (hot) { ctx.shadowColor = '#ffd36b'; ctx.shadowBlur = 14; }
-          ctx.fillStyle = hot ? '#ffce7a' : '#caa46a';
-          ctx.fillRect(toX(d.x - w / 2), toY(d.y + h / 2), w * PXM, h * PXM);
-          ctx.restore();
-          ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = '700 10px ' + fam;
-          ctx.fillText(p.label, toX(p.x), toY(p.y) + (p.y > s.py ? -10 : 14));
+      // Door frame arcs (quarter-circle showing door swing)
+      if (plan.gaps) {
+        ctx.save(); ctx.strokeStyle = 'rgba(170,148,100,0.65)'; ctx.lineWidth = 1.5;
+        for (const g of plan.gaps) {
+          ctx.beginPath(); ctx.arc(toX(g.cx), toY(g.cy), DOOR_W * PXM * 0.5, 0, Math.PI / 2); ctx.stroke();
         }
+        ctx.restore();
+      }
+
+      // Portals
+      let nearest = null, nd = 2.4;
+      for (const p of plan.portals) { const d = Math.hypot(p.x - s.px, p.y - s.py); if (d < nd) { nd = d; nearest = p; } }
+
+      for (const p of plan.portals) {
+        if (p.kind !== 'unit') continue;
+        const d = p.door, w = d.horiz ? DOOR_W : 0.18, h = d.horiz ? 0.18 : DOOR_W;
+        const hot = p === nearest;
+        ctx.save(); if (hot) { ctx.shadowColor = '#FFD040'; ctx.shadowBlur = 18; }
+        ctx.fillStyle = hot ? '#FFD040' : '#C8A038';
+        ctx.fillRect(toX(d.x - w / 2), toY(d.y + h / 2), w * PXM, h * PXM);
+        ctx.restore();
+        ctx.fillStyle = 'rgba(255,255,255,0.88)'; ctx.font = '600 9px ' + fam; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(p.label, toX(p.x), toY(p.y) + (p.y > s.py ? -13 : 16));
       }
       for (const p of plan.portals) {
         if (p.kind !== 'exit') continue;
         const ex = toX(p.x), ey = toY(p.y);
-        ctx.save(); ctx.shadowColor = '#7fe0a0'; ctx.shadowBlur = 18;
-        ctx.fillStyle = 'rgba(127,224,160,0.85)';
-        ctx.beginPath(); ctx.arc(ex, ey, Math.max(7, DOOR_W * PXM * 0.5), 0, Math.PI * 2); ctx.fill(); ctx.restore();
-        ctx.fillStyle = '#0a0c10'; ctx.font = '700 12px ' + fam; ctx.fillText('EXIT', ex, ey);
+        ctx.save(); ctx.shadowColor = '#50D878'; ctx.shadowBlur = 22;
+        ctx.fillStyle = 'rgba(80,216,110,0.90)';
+        ctx.beginPath(); ctx.arc(ex, ey, Math.max(9, DOOR_W * PXM * 0.44), 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        ctx.fillStyle = '#0A200E'; ctx.font = '700 11px ' + fam; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('EXIT', ex, ey);
       }
 
-      // player
+      // Player
       const pxX = vw / 2, pxY = vh / 2;
       ctx.save(); ctx.translate(pxX, pxY); ctx.rotate((s.heading * Math.PI) / 180);
-      ctx.fillStyle = '#4aa3f0'; ctx.strokeStyle = '#14202e'; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(0, 0, PLAYER_R * PXM + 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#ffe08a'; ctx.beginPath(); ctx.arc(0, -(PLAYER_R * PXM + 1), 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.beginPath(); ctx.ellipse(3, 4, PLAYER_R * PXM + 4, PLAYER_R * PXM + 2, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#4AAEF2'; ctx.strokeStyle = '#0A1830'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(0, 0, PLAYER_R * PXM + 3, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#FFE080'; ctx.beginPath(); ctx.arc(0, -(PLAYER_R * PXM + 3), 3.5, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
-      ctx.fillStyle = '#fff'; ctx.font = '700 12px ' + fam; ctx.textAlign = 'center';
-      ctx.fillText(user, pxX, pxY - (PLAYER_R * PXM + 16));
+      ctx.save(); ctx.font = '700 12px ' + fam; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.strokeStyle = 'rgba(0,0,0,0.65)'; ctx.lineWidth = 3; ctx.strokeText(user, pxX, pxY - (PLAYER_R * PXM + 18));
+      ctx.fillStyle = '#FFFFFF'; ctx.fillText(user, pxX, pxY - (PLAYER_R * PXM + 18));
+      ctx.restore();
 
-      // a hint when a unit door is within reach
-      if (nearest && nearest.kind === 'unit' && nd < 1.7) {
-        ctx.fillStyle = 'rgba(255,211,107,0.95)'; ctx.font = '700 13px ' + fam;
-        ctx.fillText('Enter ' + nearest.label, pxX, pxY + (PLAYER_R * PXM + 26));
+      // "Press F" hint near a portal
+      if (nearest && nd < 2.1) {
+        const hint = nearest.kind === 'exit' ? 'F — exit building' : 'F — enter ' + nearest.label;
+        ctx.save(); ctx.font = '700 13px ' + fam; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.lineWidth = 3; ctx.strokeText(hint, pxX, pxY + (PLAYER_R * PXM + 30));
+        ctx.fillStyle = 'rgba(255,218,70,0.96)'; ctx.fillText(hint, pxX, pxY + (PLAYER_R * PXM + 30));
+        ctx.restore();
       }
 
-      // vignette
-      const g = ctx.createRadialGradient(vw / 2, vh / 2, Math.min(vw, vh) * 0.3, vw / 2, vh / 2, Math.max(vw, vh) * 0.7);
-      g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.55)');
+      // Vignette
+      const g = ctx.createRadialGradient(vw / 2, vh / 2, Math.min(vw, vh) * 0.36, vw / 2, vh / 2, Math.max(vw, vh) * 0.74);
+      g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.38)');
       ctx.fillStyle = g; ctx.fillRect(0, 0, vw, vh);
     }
 
