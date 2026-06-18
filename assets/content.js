@@ -467,6 +467,69 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
   `
 },
 
+/* ----------------------- MAP DRIVE ----------------------- */
+'/map-drive': {
+  section: 'drive', title: 'Map Drive',
+  html: () => `
+    <span class="eyebrow">LIVE SATELLITE · DRIVE & WALK</span>
+    <h1>Map Drive</h1>
+    <p class="lead">A real satellite map you can drive on. <strong>Right-click</strong> anywhere and the car routes there along real roads with proper acceleration, cornering and braking. Hop out and walk around as a person at realistic speed.</p>
+
+    <div class="mg-wrap" id="mg-wrap">
+      <div id="mg-map"></div>
+
+      <!-- top-left controls -->
+      <div class="mg-panel mg-controls">
+        <div class="mg-mode" id="mg-mode">🚗 Driving</div>
+        <div class="mg-row">
+          <input id="mg-setspeed" type="number" value="50" min="0" max="280" />
+          <span class="mg-unit">km/h</span>
+          <button id="mg-setbtn">Set limit</button>
+        </div>
+        <div class="mg-row mg-presets" id="mg-presets">
+          <button data-v="30">30</button><button data-v="50">50</button>
+          <button data-v="80">80</button><button data-v="130">130</button>
+        </div>
+        <button class="mg-toggle" id="mg-toggle">🚶 Leave car</button>
+        <button class="mg-stop" id="mg-stop">■ Stop</button>
+        <div class="mg-hint" id="mg-hint">Right-click the map → drive there. Scroll to zoom.</div>
+      </div>
+
+      <!-- bottom-right dashboard -->
+      <div class="mg-panel mg-dash">
+        <div class="mg-gauges">
+          <div class="mg-gauge">
+            <canvas id="mg-speedo" width="180" height="180"></canvas>
+            <div class="mg-digi"><b id="mg-kmh">0</b><span>km/h</span></div>
+          </div>
+          <div class="mg-gauge">
+            <canvas id="mg-tach" width="130" height="130"></canvas>
+            <div class="mg-gear" id="mg-gear">N</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- centered vehicle / person overlays -->
+      <div class="mg-ent mg-car" id="mg-car"><div class="mg-car-rot" id="mg-car-rot">
+        <svg viewBox="0 0 40 72" width="34" height="60">
+          <rect x="6" y="4" width="28" height="64" rx="10" fill="#e23b3b" stroke="#7a1414" stroke-width="2"/>
+          <rect x="9" y="10" width="22" height="16" rx="5" fill="#1c2230"/>
+          <rect x="9" y="40" width="22" height="18" rx="5" fill="#2a3346"/>
+          <rect x="2" y="14" width="5" height="12" rx="2" fill="#2a2020"/>
+          <rect x="33" y="14" width="5" height="12" rx="2" fill="#2a2020"/>
+          <rect x="2" y="46" width="5" height="12" rx="2" fill="#2a2020"/>
+          <rect x="33" y="46" width="5" height="12" rx="2" fill="#2a2020"/>
+        </svg>
+      </div></div>
+      <div class="mg-ent mg-person" id="mg-person" hidden><div class="mg-person-rot" id="mg-person-rot">
+        <div class="mg-p-body"></div><div class="mg-p-face"></div>
+      </div></div>
+    </div>
+
+    <div class="callout info"><span class="ico">🛰️</span><p><strong>Driving:</strong> right-click to set a destination — the car follows real roads, slowing for corners and stopping at the end. Set a speed limit with the km/h box. <strong>On foot:</strong> use <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> (hold <kbd>Shift</kbd> to run) or left-click to walk. Get near the car and press <strong>Enter car</strong>.</p></div>
+  `
+},
+
 /* ----------------------- QUANTUM LAB ----------------------- */
 '/quantum': {
   section: 'quantum', title: 'The Lab',

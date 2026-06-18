@@ -532,3 +532,75 @@ table.tbl tr:hover td { background: var(--bg-soft); }
 .wb-steps li { margin: 4px 0; }
 
 @media (max-width: 640px) { .wb-grid { grid-template-columns: 1fr; } }
+
+/* ===================== MAP DRIVE GAME ===================== */
+.mg-wrap {
+  position: relative; width: 100%; height: 76vh; min-height: 460px;
+  border-radius: 14px; overflow: hidden; margin: 18px 0 8px;
+  border: 1px solid var(--border-strong); background: #0a0d12;
+}
+#mg-map { position: absolute; inset: 0; z-index: 1; cursor: crosshair; }
+.mg-wrap .leaflet-container { background: #0a0d12; font-family: var(--sans); }
+
+.mg-panel {
+  position: absolute; z-index: 500;
+  background: color-mix(in srgb, #11151c 82%, transparent);
+  color: #eef2f6; border: 1px solid rgba(255,255,255,.14);
+  border-radius: 12px; padding: 12px; backdrop-filter: blur(8px);
+  box-shadow: 0 8px 30px rgba(0,0,0,.4);
+}
+.mg-controls { top: 14px; left: 14px; width: 230px; display: flex; flex-direction: column; gap: 9px; }
+.mg-mode { font-weight: 800; font-size: 15px; }
+.mg-row { display: flex; align-items: center; gap: 7px; }
+.mg-row input {
+  width: 70px; padding: 7px 9px; border-radius: 8px; font-size: 15px;
+  border: 1px solid rgba(255,255,255,.2); background: rgba(0,0,0,.3); color: #fff;
+}
+.mg-unit { font-size: 13px; color: #b9c2cc; }
+.mg-controls button {
+  border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.08);
+  color: #fff; border-radius: 8px; padding: 7px 11px; font-size: 13px;
+  font-weight: 700; cursor: pointer; transition: .14s;
+}
+.mg-controls button:hover { background: var(--accent); border-color: var(--accent); }
+.mg-presets { gap: 5px; }
+.mg-presets button { flex: 1; padding: 6px 0; }
+.mg-toggle { background: rgba(55,192,255,.16) !important; border-color: rgba(55,192,255,.4) !important; }
+.mg-stop { background: rgba(231,76,60,.16) !important; border-color: rgba(231,76,60,.45) !important; }
+.mg-hint { font-size: 11.5px; color: #aeb7c1; line-height: 1.45; }
+
+.mg-dash { right: 14px; bottom: 14px; }
+.mg-gauges { display: flex; align-items: flex-end; gap: 10px; }
+.mg-gauge { position: relative; }
+.mg-digi {
+  position: absolute; left: 0; right: 0; bottom: 30px; text-align: center;
+}
+.mg-digi b { display: block; font-size: 30px; font-weight: 800; line-height: 1; color: #fff; }
+.mg-digi span { font-size: 11px; color: #aeb7c1; }
+.mg-gear {
+  position: absolute; left: 0; right: 0; bottom: 26px; text-align: center;
+  font-size: 22px; font-weight: 800; color: #ffce47;
+}
+
+/* centred entity overlays */
+.mg-ent {
+  position: absolute; left: 50%; top: 50%; z-index: 400;
+  transform: translate(-50%, -50%); pointer-events: none;
+  filter: drop-shadow(0 4px 6px rgba(0,0,0,.55));
+}
+.mg-car-rot, .mg-person-rot { transition: transform .08s linear; }
+.mg-person { width: 30px; height: 30px; }
+.mg-person-rot { position: relative; width: 30px; height: 30px; }
+.mg-p-body {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: #4aa3f0; border: 3px solid #1d2c3e;
+}
+.mg-p-face {
+  position: absolute; left: 50%; top: 2px; width: 7px; height: 7px;
+  margin-left: -3.5px; border-radius: 50%; background: #ffe08a;
+}
+
+@media (max-width: 720px) {
+  .mg-controls { width: 190px; }
+  .mg-dash { transform: scale(.82); transform-origin: bottom right; }
+}

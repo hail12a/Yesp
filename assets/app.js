@@ -104,6 +104,7 @@
     wireScriptLibrary();
     wireAvatarVault();
     if (typeof window.wireWorldBuilder === 'function') window.wireWorldBuilder();
+    if (typeof window.wireMapGame === 'function') window.wireMapGame();
   }
 
   /* ---------- SCRIPT LIBRARY ---------- */
