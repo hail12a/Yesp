@@ -551,9 +551,17 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
 
       <!-- remote players + parked cars get injected here -->
       <div class="mg-remotes" id="mg-remotes"></div>
+
+      <!-- doorway highlights (one per building, shown within 40 m) -->
+      <div class="mg-doors" id="mg-doors"></div>
+
+      <!-- interior view — covers the map while you're inside a building -->
+      <canvas class="mg-interior" id="mg-interior" hidden></canvas>
     </div>
 
     <div class="callout info"><span class="ico">🛰️</span><p><strong>PC:</strong> click the map to drive there · <kbd>WASD</kbd>/<kbd>Shift</kbd> to walk &amp; run · <kbd>E</kbd> to enter/leave the car. <strong>Android:</strong> tap to drive · on-screen joystick to walk · the <strong>T</strong> button to enter/leave. Names float above every player; your parked car shows its model where you left it.</p></div>
+
+    <div class="callout tip"><span class="ico">🚪</span><p><strong>Step inside.</strong> On foot, walk up to any building — a 🚪 doorway lights up when you're within 40&nbsp;m (one realistic entrance per building). Reach it and press <kbd>E</kbd> (or <strong>T</strong> on mobile) to enter a procedurally-built interior — rooms, furniture and all, generated from that building's real size. Each interior is deterministic, so a given building always looks the same. Walk back onto the glowing <strong>EXIT</strong> to step out where you came in.</p></div>
   `
 },
 

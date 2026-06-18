@@ -697,4 +697,32 @@ table.tbl tr:hover td { background: var(--bg-soft); }
   .mg-dash2 { transform: translateX(-50%) scale(.9); transform-origin: bottom center; }
 }
 
-.mg-bldg { background: rgba(255,107,94,.16) !important; border-color: rgba(255,107,94,.4) !important; }
+/* doorway highlights — one per building, fade in within 40 m */
+.mg-doors { position: absolute; inset: 0; z-index: 440; pointer-events: none; overflow: hidden; }
+.mg-door {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 30px; height: 30px; display: grid; place-items: center;
+  transition: opacity .2s linear;
+}
+.mg-door-ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid rgba(127, 224, 160, .7);
+  background: radial-gradient(circle, rgba(127,224,160,.32), rgba(127,224,160,0) 70%);
+}
+.mg-door-ico { position: relative; font-size: 15px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.7)); }
+.mg-door.near .mg-door-ring {
+  border-color: #8affb6;
+  box-shadow: 0 0 0 4px rgba(127,224,160,.18), 0 0 14px rgba(127,224,160,.6);
+  animation: mg-door-pulse 1.1s ease-in-out infinite;
+}
+@keyframes mg-door-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.18); }
+}
+
+/* interior view — full-cover canvas while inside a building */
+.mg-interior {
+  position: absolute; inset: 0; z-index: 560;
+  width: 100%; height: 100%; display: block;
+  background: #0a0c10; touch-action: none;
+}

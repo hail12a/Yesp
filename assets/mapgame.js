@@ -35,6 +35,7 @@
     clearInterval(G.syncTimer);
     window.removeEventListener('keydown', G.onKey);
     window.removeEventListener('keyup', G.onKeyUp);
+    if (G.doorEls) for (const [, el] of G.doorEls) el.remove();
     try { G.map.remove(); } catch (e) {}
     G = null;
   }
@@ -69,6 +70,8 @@
       onKey: null, onKeyUp: null,
       buildings: [], bldgCenter: null, bldgLayer: null, bldgFetching: false,
       bldgLast: 0, buildingsOn: true, bldgRenderer: L.canvas({ padding: 0.5 }),
+      inside: null, insideBld: null, doorEls: new Map(), nearDoor: null,
+      intCv: null, intW: 0, intH: 0,
     };
 
     buildCarIcon($('#mg-car-rot'), G.carModel);
@@ -184,8 +187,8 @@
 
     G.onKey = (e) => {
       const k = e.key.toLowerCase();
-      if (k === 'e') { toggleMode(); return; }
-      if (G.mode === 'walk' && ['w', 'a', 's', 'd', 'shift', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
+      if (k === 'e') { primaryAction(); return; }
+      if ((G.mode === 'walk' || G.inside) && ['w', 'a', 's', 'd', 'shift', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
         G.keys[k] = true; G.walkTarget = null;
       }
     };
@@ -199,8 +202,8 @@
     $('#mg-presets').querySelectorAll('button').forEach((b) =>
       b.addEventListener('click', () => { $('#mg-setspeed').value = b.dataset.v; G.setSpeed = parseFloat(b.dataset.v) / 3.6; }));
     $('#mg-stop').addEventListener('click', () => { G.route = null; G.distAlong = 0; G.speed = 0; G.walkTarget = null; clearRoute(); });
-    $('#mg-toggle').addEventListener('click', toggleMode);
-    $('#mg-action').addEventListener('click', toggleMode);
+    $('#mg-toggle').addEventListener('click', primaryAction);
+    $('#mg-action').addEventListener('click', primaryAction);
 
     // shop
     buildShop();
@@ -278,6 +281,131 @@
       $('#mg-joy').hidden = true;
       $('#mg-hint').textContent = 'Click the map → drive there. Scroll to zoom.';
     }
+  }
+
+  /* ---------------- primary action dispatch ----------------
+     One button / key (E on PC, T on mobile) does the right thing
+     for the current context: leave an interior, enter a doorway,
+     or enter/leave the car. Priority: inside > doorway > car. */
+  function primaryAction() {
+    if (!G || !G.playing) return;
+    if (G.inside) { exitBuilding(); return; }
+    if (G.mode === 'walk' && G.nearDoor) { enterBuilding(G.nearDoor); return; }
+    toggleMode();
+  }
+
+  /* ---------------- building interiors ---------------- */
+  function enterBuilding(bld) {
+    if (typeof Interiors === 'undefined') return;
+    let session;
+    try { session = Interiors.openSession(bld, G.user); } catch (e) { return; }
+    G.inside = session;
+    G.insideBld = bld;
+    G.keys = {}; G.joy.active = false; G.joy.x = G.joy.y = 0;
+    // park the avatar in the doorway so other players see you there
+    G.mode = 'walk';
+    G.pos = { lat: bld._entry.lat, lng: bld._entry.lng };
+    G.carPos = { ...G.pos };
+    // swap the view
+    $('#mg-car').hidden = true;
+    $('#mg-person').hidden = true;
+    $('#mg-mylabel').hidden = true;
+    $('#mg-dash2').hidden = true;
+    $('#mg-interior').hidden = false;
+    hideDoors();
+    $('#mg-mode').textContent = '🏠 ' + session.plan.title;
+    $('#mg-toggle').textContent = '🚪 Leave building (E)';
+    $('#mg-hint').textContent = TOUCH ? 'Joystick to walk · reach the glowing EXIT · tap T.'
+                                      : 'WASD to walk · Shift to run · reach the glowing EXIT · press E.';
+    if (TOUCH) { $('#mg-joy').hidden = false; $('#mg-action').hidden = false; $('#mg-action').textContent = 'Exit (T)'; }
+    sizeInterior(true);
+  }
+
+  function exitBuilding() {
+    const b = G.insideBld;
+    G.inside = null; G.insideBld = null;
+    G.keys = {};
+    $('#mg-interior').hidden = true;
+    // step out ≈3 m clear of the wall, on foot
+    if (b && b._entry) {
+      const o = b._entry.out;
+      G.pos = { lat: b._entry.lat + o.lat * 3, lng: b._entry.lng + o.lng * 3 };
+      G.carPos = { ...G.pos };
+    }
+    G.mode = 'walk';
+    $('#mg-person').hidden = false;
+    $('#mg-mylabel').hidden = false;
+    $('#mg-dash2').hidden = false;
+    $('#mg-mode').textContent = '🚶 On foot';
+    $('#mg-toggle').textContent = '🚗 Enter car (E)';
+    $('#mg-hint').textContent = TOUCH ? 'Joystick to walk · reach the car · T to enter.'
+                                      : 'WASD to walk · Shift to run · E to enter the car.';
+    if (TOUCH) { $('#mg-action').textContent = 'Enter (T)'; }
+  }
+
+  function sizeInterior(force) {
+    const cv = $('#mg-interior');
+    if (!cv) return;
+    const rect = G.mapEl.getBoundingClientRect();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const W = Math.round(rect.width), H = Math.round(rect.height);
+    if (force || G.intW !== W || G.intH !== H) {
+      cv.width = Math.max(1, Math.round(W * dpr));
+      cv.height = Math.max(1, Math.round(H * dpr));
+      cv.style.width = W + 'px'; cv.style.height = H + 'px';
+      cv._dpr = dpr;
+      G.intW = W; G.intH = H;
+    }
+  }
+
+  function stepInterior(dt) {
+    const res = G.inside.step(dt, { keys: G.keys, joy: G.joy });
+    sizeInterior(false);
+    G.inside.render($('#mg-interior'));
+    if (res.exited) exitBuilding();
+  }
+
+  /* ---------------- doorway highlights on the map ----------------
+     One entry marker per building, shown only when you're on foot
+     and within 40 m. The closest within ~6 m becomes G.nearDoor and
+     can be entered with E / T. */
+  function updateDoors() {
+    if (G.mode !== 'walk' || !G.buildingsOn || !G.buildings.length) { hideDoors(); G.nearDoor = null; return; }
+    const layer = $('#mg-doors');
+    if (!layer) { G.nearDoor = null; return; }
+    const live = new Set();
+    let near = null, nd = 1e9;
+    for (const b of G.buildings) {
+      let ent;
+      try { ent = Interiors.ensureEntry(b); } catch (e) { continue; }
+      const dist = haversine(G.pos, ent);
+      if (dist > 40) continue;
+      live.add(b._id);
+      let el = G.doorEls.get(b._id);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'mg-door';
+        el.innerHTML = '<span class="mg-door-ring"></span><span class="mg-door-ico">🚪</span>';
+        layer.appendChild(el);
+        G.doorEls.set(b._id, el);
+      }
+      const p = G.map.latLngToContainerPoint([ent.lat, ent.lng]);
+      el.style.left = p.x + 'px'; el.style.top = p.y + 'px';
+      const enterable = dist < 6;
+      el.classList.toggle('near', enterable);
+      el.style.opacity = String(Math.max(0.25, 1 - dist / 48));
+      if (enterable && dist < nd) { nd = dist; near = b; }
+    }
+    // prune doors that drifted out of range
+    for (const [id, el] of G.doorEls) {
+      if (!live.has(id)) { el.remove(); G.doorEls.delete(id); }
+    }
+    G.nearDoor = near;
+  }
+  function hideDoors() {
+    for (const [, el] of G.doorEls) el.remove();
+    G.doorEls.clear();
+    G.nearDoor = null;
   }
 
   /* ---------------- routing ---------------- */
@@ -479,12 +607,18 @@
     if (dt > 0.1) dt = 0.1;
 
     if (G.playing) {
-      if (G.mode === 'drive') stepDrive(dt); else stepWalk(dt);
-      G.map.setView([G.pos.lat, G.pos.lng], G.map.getZoom(), { animate: false });
-      renderLocal();
-      renderRemotes(dt);
-      updateHUD();
-      updateAction();
+      if (G.inside) {
+        stepInterior(dt);
+        updateAction();
+      } else {
+        if (G.mode === 'drive') stepDrive(dt); else stepWalk(dt);
+        G.map.setView([G.pos.lat, G.pos.lng], G.map.getZoom(), { animate: false });
+        renderLocal();
+        renderRemotes(dt);
+        updateDoors();
+        updateHUD();
+        updateAction();
+      }
     }
     G.raf = requestAnimationFrame(loop);
   }
@@ -620,10 +754,12 @@
   function updateAction() {
     const a = $('#mg-action');
     if (!TOUCH) return;
+    if (G.inside) { a.disabled = false; a.textContent = 'Exit (T)'; return; }
     if (G.mode === 'walk') {
+      if (G.nearDoor) { a.disabled = false; a.textContent = 'Enter building (T)'; return; }
       const near = haversine(G.pos, G.carPos) <= 10;
       a.disabled = !near;
-      a.textContent = near ? 'Enter (T)' : 'Walk to car';
+      a.textContent = near ? 'Enter car (T)' : 'Walk to a car/door';
     } else { a.disabled = false; a.textContent = 'Leave (T)'; }
   }
 
