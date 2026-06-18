@@ -471,38 +471,72 @@
 
   function startCutTree(tree) {
     if (G.cutting) return;
-    // face the tree
     const dLat = tree.lat - G.pos.lat, dLng = (tree.lng - G.pos.lng) * Math.cos((G.pos.lat * Math.PI) / 180);
     G.heading = (Math.atan2(dLng, dLat) * 180) / Math.PI;
-    G.cutting = { tree, swings: 0, t: 0, done: false };
+    tree.hits = 0;
+    G.cutting = { tree, swings: 0, t: 0, done: false, lastSwing: -1, shakeT: 0 };
     G.keys = {}; G.joy.active = false; G.joy.x = G.joy.y = 0;
     $('#mg-axe').hidden = false;
-    $('#mg-hint').textContent = 'Chopping… (3 swings)';
+    updateChopHint(0);
   }
 
-  // Called each frame while G.cutting is set; advances the swing animation.
-  // One full swing cycle per second, 3 swings to fell a tree → 3 logs.
+  function updateChopHint(hits) {
+    const bars = ['○○○', '●○○', '●●○', '●●●'];
+    $('#mg-hint').textContent = `🪓 ${bars[hits]}  ${hits === 0 ? 'Swing the axe!' : hits === 1 ? 'Keep going!' : hits === 2 ? 'One more!' : 'Timber!'}`;
+  }
+
+  function screenShake(intensity) {
+    const el = document.getElementById('mg-map') || document.querySelector('.mg-map');
+    if (!el) return;
+    let frames = 0;
+    const tick = () => {
+      const dx = (Math.random() - 0.5) * intensity;
+      const dy = (Math.random() - 0.5) * intensity;
+      el.style.transform = `translate(${dx}px,${dy}px)`;
+      if (++frames < 6) requestAnimationFrame(tick);
+      else el.style.transform = '';
+    };
+    requestAnimationFrame(tick);
+  }
+
   function stepCut(dt) {
     const c = G.cutting; if (!c) return;
     c.t += dt;
-    // swing angle: sweep a 90° arc in front, one cycle (down-and-back) per second
-    const phase = c.t % 1;               // 0..1 within the current swing
-    const sweep = Math.sin(phase * Math.PI); // 0→1→0 ease
-    const ang = G.heading - 45 + sweep * 90;  // 90° arc centred on facing dir
+    // Fast swing: accelerate into tree, slow back out
+    const SWING_DUR = 0.7; // seconds per swing
+    const phase = (c.t % SWING_DUR) / SWING_DUR; // 0..1
+    // ease-in-out: fast on the way in, arc back
+    const sweep = phase < 0.5 ? 2 * phase * phase : 1 - Math.pow(-2 * phase + 2, 2) / 2;
+    const ang = G.heading - 45 + sweep * 90;
     const axe = $('#mg-axe');
-    // pivot at the player, blade thrown ~34px out in the facing direction
+    // sway the tree marker slightly toward the impact on impact phase
+    if (c.shakeT > 0) {
+      c.shakeT -= dt;
+      const sway = Math.sin(c.shakeT * 18) * 0.00003 * (c.shakeT / 0.25);
+      c.tree._swayLat = sway; c.tree._swayLng = sway * 0.4;
+    } else {
+      c.tree._swayLat = 0; c.tree._swayLng = 0;
+    }
     axe.style.transform = `translate(-50%, -50%) rotate(${ang}deg) translate(0, -34px)`;
-    // count a completed swing each time we pass a 1-second boundary
-    const swingNo = Math.floor(c.t);
+
+    const swingNo = Math.floor(c.t / SWING_DUR);
     if (swingNo > c.swings) {
       c.swings = swingNo;
-      $('#mg-hint').textContent = `Chopping… ${Math.min(3, c.swings)}/3`;
-      if (c.swings >= 3) finishCutTree();
+      if (c.swings >= 3) { finishCutTree(); return; }
+      // hit feedback: update damage state, redraw tree, shake screen
+      c.tree.hits = Math.min(2, c.swings);
+      c.shakeT = 0.25;
+      updateChopHint(c.swings);
+      screenShake(4 + c.swings * 2);
+      // flash the tree bright then redraw with damage notch
+      drawTrees(c.tree.id);
+      setTimeout(() => drawTrees(), 120);
     }
   }
 
   function cancelCut() {
     if (!G.cutting) return;
+    if (G.cutting.tree) G.cutting.tree.hits = 0;
     G.cutting = null;
     $('#mg-axe').hidden = true;
     $('#mg-hint').textContent = TOUCH ? 'Joystick to walk · reach the car · T to enter.' : 'WASD to walk · Shift to run · E to enter the car.';
@@ -512,14 +546,15 @@
     const c = G.cutting; if (!c || c.done) return;
     c.done = true;
     const tree = c.tree;
+    tree.hits = 0;
     G.cutting = null;
     $('#mg-axe').hidden = true;
-    // fell it locally + persist to the shared world
+    screenShake(10);
     G.treeCuts.add(tree.id);
     drawTrees();
     addItem('log', '🪵', 'Log', 3, 'Rough-cut timber from a felled tree. Used for building.');
     if ($('#mg-inv') && !$('#mg-inv').hidden) renderInventory();
-    $('#mg-hint').textContent = 'Tree felled — +3 logs. ' + (TOUCH ? 'T to enter the car.' : 'E to enter the car.');
+    $('#mg-hint').textContent = '🪵 Tree felled — +3 logs! ' + (TOUCH ? 'T to enter the car.' : 'E to enter the car.');
     fetch('/api/world/tree_cut', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: G.token, id: tree.id, lat: tree.lat, lng: tree.lng }),
@@ -816,12 +851,12 @@
   async function loadForests(center) {
     if (G.forestFetching) return;
     const now = Date.now();
-    if (G.forests.length > 0 && G.forestCenter && haversine(center, G.forestCenter) < 300 && now - G.forestLast < 60000) return;
+    if (G.forests.length > 0 && G.forestCenter && haversine(center, G.forestCenter) < 500 && now - G.forestLast < 120000) return;
     G.forestFetching = true;
-    const d = 0.006, cl = Math.cos((center.lat * Math.PI) / 180);
+    // Use a wider bbox (~2km) so large forest polygons that straddle the player are captured
+    const d = 0.018, cl = Math.cos((center.lat * Math.PI) / 180);
     const s = center.lat - d, n = center.lat + d, w = center.lng - d / cl, e = center.lng + d / cl;
-    // woodland + forest polygons; tree rows are handled as point clouds we generate ourselves
-    const q = `[out:json][timeout:25];(way["natural"="wood"](${s},${w},${n},${e});way["landuse"="forest"](${s},${w},${n},${e});relation["natural"="wood"](${s},${w},${n},${e});relation["landuse"="forest"](${s},${w},${n},${e}););out geom;`;
+    const q = `[out:json][timeout:45];(way["natural"="wood"](${s},${w},${n},${e});way["landuse"="forest"](${s},${w},${n},${e});way["landuse"="wood"](${s},${w},${n},${e});way["natural"="scrub"](${s},${w},${n},${e});relation["natural"="wood"](${s},${w},${n},${e});relation["landuse"="forest"](${s},${w},${n},${e});relation["landuse"="wood"](${s},${w},${n},${e}););out geom;`;
     try {
       const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
       const data = await r.json();
@@ -858,8 +893,8 @@
     const spacing = 8; // metres between trees
     const dLat = spacing / mLat, dLng = spacing / mLng;
     let count = 0;
-    for (let la = poly.minLat + dLat * 0.5; la <= poly.maxLat && count < 500; la += dLat) {
-      for (let ln = poly.minLng + dLng * 0.5; ln <= poly.maxLng && count < 500; ln += dLng) {
+    for (let la = poly.minLat + dLat * 0.5; la <= poly.maxLat && count < 1500; la += dLat) {
+      for (let ln = poly.minLng + dLng * 0.5; ln <= poly.maxLng && count < 1500; ln += dLng) {
         const jla = la + (rnd() - 0.5) * dLat * 0.85;
         const jln = ln + (rnd() - 0.5) * dLng * 0.85;
         if (rnd() < 0.30) continue; // natural clearings
@@ -879,24 +914,60 @@
         if (seenId.has(t.id)) continue;
         seenId.add(t.id);
         trees.push(t);
-        if (trees.length >= 1200) break;
+        if (trees.length >= 3000) break;
       }
-      if (trees.length >= 1200) break;
+      if (trees.length >= 3000) break;
     }
     G.trees = trees;
   }
 
-  function drawTrees() {
+  // Canopy colour palette — slight variation for natural look
+  const TREE_PALETTES = [
+    { canopy: '#2f6b27', shadow: '#1c4a18', trunk: '#7a5230' },
+    { canopy: '#3a7a2e', shadow: '#245120', trunk: '#8a6038' },
+    { canopy: '#256022', shadow: '#163d15', trunk: '#6e4a28' },
+    { canopy: '#4a8535', shadow: '#2d5c1e', trunk: '#856035' },
+  ];
+
+  function treeIconSvg(t) {
+    // stable per-tree size + palette from its id
+    const h = hashStr(t.id);
+    const pal = TREE_PALETTES[h % TREE_PALETTES.length];
+    const r = 8 + (h % 5);           // canopy radius 8–12 px
+    const sz = (r + 4) * 2;
+    const cx = r + 4, cy = r + 4;
+    const damage = t.hits || 0;      // 0=full, 1=notched, 2=cracking
+    let overlay = '';
+    if (damage === 1) overlay = `<line x1="${cx-3}" y1="${cy+2}" x2="${cx+4}" y2="${cy-3}" stroke="#c8a060" stroke-width="2" opacity="0.85"/>`;
+    if (damage >= 2) {
+      overlay = `<line x1="${cx-5}" y1="${cy+4}" x2="${cx+5}" y2="${cy-4}" stroke="#c8a060" stroke-width="2.5" opacity="0.9"/>` +
+                `<line x1="${cx-2}" y1="${cy-3}" x2="${cx+3}" y2="${cy+2}" stroke="#a07840" stroke-width="1.5" opacity="0.7"/>`;
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${sz}" height="${sz}">
+      <circle cx="${cx}" cy="${cy+2}" r="${r}" fill="${pal.shadow}" opacity="0.35"/>
+      <circle cx="${cx-1}" cy="${cy-1}" r="${r}" fill="${pal.canopy}"/>
+      <circle cx="${cx-3}" cy="${cy-3}" r="${Math.round(r*0.55)}" fill="${pal.canopy}" opacity="0.7"/>
+      <circle cx="${cx+3}" cy="${cy-2}" r="${Math.round(r*0.45)}" fill="${pal.shadow}" opacity="0.4"/>
+      ${overlay}
+    </svg>`;
+  }
+
+  function drawTrees(highlightId) {
     if (G.treeLayer) { G.map.removeLayer(G.treeLayer); G.treeLayer = null; }
     G.treeLayer = L.layerGroup();
     for (const t of G.trees) {
-      if (G.treeCuts.has(t.id)) continue; // already harvested
-      // canopy
-      L.circleMarker([t.lat, t.lng], {
-        renderer: G.treeRenderer, interactive: false,
-        radius: 4.5, color: '#1f3d1c', weight: 1, opacity: 0.8,
-        fill: true, fillColor: '#2f6b27', fillOpacity: 0.85,
-      }).addTo(G.treeLayer);
+      if (G.treeCuts.has(t.id)) continue;
+      const h = hashStr(t.id);
+      const r = 8 + (h % 5);
+      const sz = (r + 4) * 2;
+      const isHit = t.id === highlightId;
+      const svg = isHit
+        ? treeIconSvg(t).replace('opacity="0.35"', 'opacity="0.6"').replace(TREE_PALETTES[h % TREE_PALETTES.length].canopy, '#c8e090')
+        : treeIconSvg(t);
+      const icon = L.divIcon({
+        html: svg, className: '', iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2],
+      });
+      L.marker([t.lat, t.lng], { icon, interactive: false, keyboard: false }).addTo(G.treeLayer);
     }
     G.treeLayer.addTo(G.map);
   }
