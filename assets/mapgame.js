@@ -52,7 +52,7 @@
       mapEl.innerHTML = '<div style="padding:24px;color:#ccc;font:14px sans-serif">Map library failed to load. Refresh.</div>';
       return;
     }
-    const start = { lat: 48.2082, lng: 16.3738 };
+    const start = { lat: 48.2032, lng: 16.3695 }; // Opernring (Ringstraße) — a wide road in Vienna
     const map = L.map(mapEl, { center: [start.lat, start.lng], zoom: 17, zoomControl: true, attributionControl: false, doubleClickZoom: false });
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 20, maxNativeZoom: 19 }).addTo(map);
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', { maxZoom: 20, maxNativeZoom: 19, opacity: 0.9 }).addTo(map);
@@ -82,7 +82,7 @@
   function wireAuth() {
     const saved = localStorage.getItem('yesp-mg-token');
     const savedUser = localStorage.getItem('yesp-mg-user');
-    if (saved && savedUser) { G.token = saved; G.user = savedUser; showSpawn(); }
+    if (saved && savedUser) { G.token = saved; G.user = savedUser; showSpawn(true); }
 
     $('#mg-auth-tabs').querySelectorAll('button').forEach((b) =>
       b.addEventListener('click', () => {
@@ -112,35 +112,53 @@
       G.token = d.token; G.user = d.user;
       localStorage.setItem('yesp-mg-token', d.token);
       localStorage.setItem('yesp-mg-user', d.user);
-      showSpawn();
+      showSpawn(false);
     } catch (e) { msg.textContent = '✖ server unreachable'; }
   }
 
-  async function showSpawn() {
+  async function showSpawn(autoResumeIfSaved) {
     $('#mg-stage-auth').hidden = true;
     $('#mg-stage-spawn').hidden = false;
-    $('#mg-welcome').textContent = 'Welcome, ' + G.user + '. Spawn at Vienna or jump to a player who is online.';
+    $('#mg-welcome').textContent = 'Welcome, ' + G.user + '. Choose where to spawn.';
     const list = $('#mg-spawn-list');
-    list.innerHTML = `<label class="mg-spawn-opt"><input type="radio" name="mg-spawn" value="here" checked> 📍 Vienna (default)</label>`;
+    const savedPos = localStorage.getItem('yesp-mg-pos');
+    let defaultVal = 'here';
+    let items = '';
+    if (savedPos) {
+      items += `<label class="mg-spawn-opt"><input type="radio" name="mg-spawn" value="resume" checked> 📌 Resume where you left off</label>`;
+      items += `<label class="mg-spawn-opt"><input type="radio" name="mg-spawn" value="here"> 📍 Vienna (default spawn)</label>`;
+      defaultVal = 'resume';
+    } else {
+      items += `<label class="mg-spawn-opt"><input type="radio" name="mg-spawn" value="here" checked> 📍 Vienna (default spawn)</label>`;
+    }
+    list.innerHTML = items;
     try {
       const r = await fetch('/api/world/players');
       const players = await r.json();
       players.filter((p) => p.user !== G.user).forEach((p) => {
         const o = document.createElement('label');
         o.className = 'mg-spawn-opt';
-        o.innerHTML = `<input type="radio" name="mg-spawn" value="${p.lat},${p.lng}"> 🧍 ${escapeH(p.user)}`;
+        o.innerHTML = `<input type="radio" name="mg-spawn" value="${p.lat},${p.lng}"> 🧍 Spawn on ${escapeH(p.user)}`;
         list.appendChild(o);
       });
     } catch (e) {}
+    // if already logged in (page load), auto-resume if there's a saved position
+    if (autoResumeIfSaved && savedPos) startSpawn();
   }
 
   function startSpawn() {
     const sel = document.querySelector('input[name="mg-spawn"]:checked');
-    if (sel && sel.value !== 'here') {
+    if (sel && sel.value === 'resume') {
+      try {
+        const saved = JSON.parse(localStorage.getItem('yesp-mg-pos'));
+        G.pos = { lat: saved.lat, lng: saved.lng };
+      } catch (e) { G.pos = { lat: 48.2032, lng: 16.3695 }; }
+    } else if (sel && sel.value !== 'here') {
       const [la, ln] = sel.value.split(',').map(Number);
-      G.pos = { lat: la + 0.0002, lng: ln + 0.0002 };
+      // offset slightly so we don't overlap the other player
+      G.pos = { lat: la + 0.00015, lng: ln + 0.00015 };
     } else {
-      G.pos = { lat: 48.2082, lng: 16.3738 };
+      G.pos = { lat: 48.2032, lng: 16.3695 };
     }
     G.carPos = { ...G.pos };
     $('#mg-auth').style.display = 'none';
@@ -183,12 +201,6 @@
     $('#mg-stop').addEventListener('click', () => { G.route = null; G.distAlong = 0; G.speed = 0; G.walkTarget = null; clearRoute(); });
     $('#mg-toggle').addEventListener('click', toggleMode);
     $('#mg-action').addEventListener('click', toggleMode);
-    $('#mg-bldg').addEventListener('click', () => {
-      G.buildingsOn = !G.buildingsOn;
-      $('#mg-bldg').textContent = '🏢 Walls: ' + (G.buildingsOn ? 'ON' : 'OFF');
-      if (G.buildingsOn) { G.bldgCenter = null; loadBuildings(G.pos); }
-      else drawBuildings();
-    });
 
     // shop
     buildShop();
@@ -256,7 +268,7 @@
       if (TOUCH) $('#mg-joy').hidden = false;
       $('#mg-hint').textContent = TOUCH ? 'Joystick to walk · reach the car · T to enter.' : 'WASD to walk · Shift to run · E to enter the car.';
     } else {
-      if (haversine(G.pos, G.carPos) > 14) { $('#mg-hint').textContent = 'Walk closer to your car to enter.'; return; }
+      if (haversine(G.pos, G.carPos) > 10) { $('#mg-hint').textContent = 'Walk closer to your car to enter.'; return; }
       G.mode = 'drive'; G.pos = { ...G.carPos }; G.walkVel = { e: 0, n: 0 };
       $('#mg-car').hidden = false;
       $('#mg-person').hidden = true;
@@ -414,6 +426,7 @@
   async function syncNow() {
     if (!G || !G.playing) return;
     loadBuildings(G.pos);
+    localStorage.setItem('yesp-mg-pos', JSON.stringify({ lat: G.pos.lat, lng: G.pos.lng }));
     try {
       const r = await fetch('/api/world/sync', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -608,7 +621,7 @@
     const a = $('#mg-action');
     if (!TOUCH) return;
     if (G.mode === 'walk') {
-      const near = haversine(G.pos, G.carPos) <= 14;
+      const near = haversine(G.pos, G.carPos) <= 10;
       a.disabled = !near;
       a.textContent = near ? 'Enter (T)' : 'Walk to car';
     } else { a.disabled = false; a.textContent = 'Leave (T)'; }
