@@ -73,6 +73,7 @@
       forests: [], trees: [], treeCuts: new Set(), treeLayer: null,
       treeRenderer: L.canvas({ padding: 0.5 }),
       forestFetching: false, forestLast: 0, forestCenter: null, treeCutsLoaded: false,
+      entityScale: 1,
       inside: null, insideBld: null, doorEls: new Map(), nearDoor: null,
       intCv: null, intW: 0, intH: 0,
       inventory: loadInventory(), invSel: null, cutting: null,
@@ -200,6 +201,10 @@
       else G.walkTarget = { lat: e.latlng.lat, lng: e.latlng.lng };
     });
     G.map.on('contextmenu', (e) => { if (G.playing && G.mode === 'drive') routeTo(e.latlng); });
+    G.map.on('zoomend', () => {
+      G.entityScale = Math.max(0.35, Math.min(3.0, Math.pow(2, G.map.getZoom() - 17)));
+      if (G.trees.length) drawTrees();
+    });
 
     G.onKey = (e) => {
       const k = e.key.toLowerCase();
@@ -848,35 +853,65 @@
     G.treeCutsLoaded = true;
   }
 
+  function parseForestElements(elements, seenId) {
+    const polys = [];
+    for (const el of elements || []) {
+      if (seenId.has(el.id)) continue;
+      seenId.add(el.id);
+      let rings = [];
+      if (el.type === 'way' && el.geometry) rings = [el.geometry];
+      else if (el.type === 'relation' && el.members) rings = el.members.filter((m) => m.geometry && m.role !== 'inner').map((m) => m.geometry);
+      for (let gi = 0; gi < rings.length; gi++) {
+        const g = rings[gi];
+        if (!g || g.length < 3) continue;
+        let minLat = 1e9, maxLat = -1e9, minLng = 1e9, maxLng = -1e9;
+        const pts = g.map((p) => {
+          if (p.lat < minLat) minLat = p.lat; if (p.lat > maxLat) maxLat = p.lat;
+          if (p.lon < minLng) minLng = p.lon; if (p.lon > maxLng) maxLng = p.lon;
+          return { lat: p.lat, lng: p.lon };
+        });
+        polys.push({ id: 'f' + (el.id || 'x') + '_' + gi, minLat, maxLat, minLng, maxLng, pts });
+      }
+    }
+    return polys;
+  }
+
   async function loadForests(center) {
     if (G.forestFetching) return;
     const now = Date.now();
     if (G.forests.length > 0 && G.forestCenter && haversine(center, G.forestCenter) < 500 && now - G.forestLast < 120000) return;
     G.forestFetching = true;
-    // Use a wider bbox (~2km) so large forest polygons that straddle the player are captured
+
     const d = 0.018, cl = Math.cos((center.lat * Math.PI) / 180);
     const s = center.lat - d, n = center.lat + d, w = center.lng - d / cl, e = center.lng + d / cl;
-    const q = `[out:json][timeout:45];(way["natural"="wood"](${s},${w},${n},${e});way["landuse"="forest"](${s},${w},${n},${e});way["landuse"="wood"](${s},${w},${n},${e});way["natural"="scrub"](${s},${w},${n},${e});relation["natural"="wood"](${s},${w},${n},${e});relation["landuse"="forest"](${s},${w},${n},${e});relation["landuse"="wood"](${s},${w},${n},${e}););out geom;`;
+    const tags = `["natural"="wood"],["landuse"="forest"],["landuse"="wood"],["natural"="scrub"]`;
+
+    // Query 1: bbox — finds polygons with at least one node inside ~2km radius
+    const qBbox = `[out:json][timeout:35];(` +
+      `way["natural"="wood"](${s},${w},${n},${e});way["landuse"="forest"](${s},${w},${n},${e});` +
+      `way["landuse"="wood"](${s},${w},${n},${e});way["natural"="scrub"](${s},${w},${n},${e});` +
+      `relation["natural"="wood"](${s},${w},${n},${e});relation["landuse"="forest"](${s},${w},${n},${e});` +
+      `relation["landuse"="wood"](${s},${w},${n},${e}););out geom;`;
+
+    // Query 2: is_in — finds any forest area that CONTAINS the player's position
+    // (handles huge polygons whose nodes are all outside the bbox above)
+    const qIsIn = `[out:json][timeout:20];is_in(${center.lat},${center.lng})->.a;` +
+      `(way["natural"="wood"](pivot.a);way["landuse"="forest"](pivot.a);` +
+      `way["landuse"="wood"](pivot.a);way["natural"="scrub"](pivot.a);` +
+      `relation["natural"="wood"](pivot.a);relation["landuse"="forest"](pivot.a);` +
+      `relation["landuse"="wood"](pivot.a););out geom;`;
+
     try {
-      const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
-      const data = await r.json();
-      const polys = [];
-      for (const el of data.elements || []) {
-        let rings = [];
-        if (el.type === 'way' && el.geometry) rings = [el.geometry];
-        else if (el.type === 'relation' && el.members) rings = el.members.filter((m) => m.geometry && m.role !== 'inner').map((m) => m.geometry);
-        for (let gi = 0; gi < rings.length; gi++) {
-          const g = rings[gi];
-          if (!g || g.length < 3) continue;
-          let minLat = 1e9, maxLat = -1e9, minLng = 1e9, maxLng = -1e9;
-          const pts = g.map((p) => {
-            if (p.lat < minLat) minLat = p.lat; if (p.lat > maxLat) maxLat = p.lat;
-            if (p.lon < minLng) minLng = p.lon; if (p.lon > maxLng) maxLng = p.lon;
-            return { lat: p.lat, lng: p.lon };
-          });
-          polys.push({ id: 'f' + (el.id || 'x') + '_' + gi, minLat, maxLat, minLng, maxLng, pts });
-        }
-      }
+      const post = (q) => fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
+      const [r1, r2] = await Promise.all([post(qBbox), post(qIsIn)]);
+      const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
+
+      const seenId = new Set();
+      const polys = [
+        ...parseForestElements(d1.elements, seenId),
+        ...parseForestElements(d2.elements, seenId),
+      ];
+
       G.forests = polys; G.forestCenter = { ...center }; G.forestLast = Date.now();
       generateTrees(center);
       drawTrees();
@@ -929,11 +964,12 @@
     { canopy: '#4a8535', shadow: '#2d5c1e', trunk: '#856035' },
   ];
 
-  function treeIconSvg(t) {
-    // stable per-tree size + palette from its id
+  function treeIconSvg(t, zoom) {
     const h = hashStr(t.id);
     const pal = TREE_PALETTES[h % TREE_PALETTES.length];
-    const r = 8 + (h % 5);           // canopy radius 8–12 px
+    // Scale canopy radius with zoom so trees represent real-world size
+    const zScale = Math.max(0.3, Math.min(3.0, Math.pow(2, (zoom || 17) - 17)));
+    const r = Math.round((7 + (h % 4)) * zScale);   // 7–10px at zoom 17, shrinks/grows with zoom
     const sz = (r + 4) * 2;
     const cx = r + 4, cy = r + 4;
     const damage = t.hits || 0;      // 0=full, 1=notched, 2=cracking
@@ -955,15 +991,17 @@
   function drawTrees(highlightId) {
     if (G.treeLayer) { G.map.removeLayer(G.treeLayer); G.treeLayer = null; }
     G.treeLayer = L.layerGroup();
+    const zoom = G.map ? G.map.getZoom() : 17;
     for (const t of G.trees) {
       if (G.treeCuts.has(t.id)) continue;
       const h = hashStr(t.id);
-      const r = 8 + (h % 5);
+      const zScale = Math.max(0.3, Math.min(3.0, Math.pow(2, zoom - 17)));
+      const r = Math.round((7 + (h % 4)) * zScale);
       const sz = (r + 4) * 2;
       const isHit = t.id === highlightId;
       const svg = isHit
-        ? treeIconSvg(t).replace('opacity="0.35"', 'opacity="0.6"').replace(TREE_PALETTES[h % TREE_PALETTES.length].canopy, '#c8e090')
-        : treeIconSvg(t);
+        ? treeIconSvg(t, zoom).replace('opacity="0.35"', 'opacity="0.6"').replace(TREE_PALETTES[h % TREE_PALETTES.length].canopy, '#c8e090')
+        : treeIconSvg(t, zoom);
       const icon = L.divIcon({
         html: svg, className: '', iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2],
       });
@@ -1138,12 +1176,13 @@
   /* ---------------- rendering ---------------- */
   function renderLocal() {
     const label = $('#mg-mylabel');
+    const sc = G.entityScale || 1;
     if (G.mode === 'drive') {
-      $('#mg-car-rot').style.transform = `rotate(${G.heading}deg)`;
+      $('#mg-car-rot').style.transform = `rotate(${G.heading}deg) scale(${sc})`;
       label.textContent = G.user;
       if (G.parkedEl) { G.parkedEl.remove(); G.parkedEl = null; }
     } else {
-      $('#mg-person-rot').style.transform = `rotate(${G.heading}deg)`;
+      $('#mg-person-rot').style.transform = `rotate(${G.heading}deg) scale(${sc})`;
       label.textContent = G.user;
       // draw my parked car on the map
       if (!G.parkedEl) {
@@ -1174,16 +1213,17 @@
       rm.curPos.lng += (rm.tgtPos.lng - rm.curPos.lng) * k;
 
       // car
+      const sc = G.entityScale || 1;
       const carRot = rm.carEl.querySelector('.mg-r-rot');
       if (carRot.dataset.car !== rm.car) { carRot.innerHTML = carSVG(CARS[rm.car].color); carRot.dataset.car = rm.car; }
-      carRot.style.transform = `rotate(${rm.heading}deg)`;
+      carRot.style.transform = `rotate(${rm.heading}deg) scale(${sc})`;
       rm.carEl.querySelector('.mg-r-label').textContent = rm.mode === 'drive' ? rm.user : CARS[rm.car].name;
       place(rm.carEl, rm.curCar);
 
       // person (only when they're on foot)
       if (rm.mode === 'walk') {
         rm.personEl.style.display = '';
-        rm.personEl.querySelector('.mg-r-rot').style.transform = `rotate(${rm.heading}deg)`;
+        rm.personEl.querySelector('.mg-r-rot').style.transform = `rotate(${rm.heading}deg) scale(${sc})`;
         rm.personEl.querySelector('.mg-r-label').textContent = rm.user;
         place(rm.personEl, rm.curPos);
       } else {
