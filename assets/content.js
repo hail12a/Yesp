@@ -519,6 +519,7 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
           <button class="mg-stop" id="mg-stop">■ Stop</button>
         </div>
         <button class="mg-toggle" id="mg-toggle">🚶 Leave car (E)</button>
+        <button class="mg-bldg" id="mg-bldg">🏢 Walls: ON</button>
         <div class="mg-hint" id="mg-hint">Click the map → drive there. Scroll to zoom.</div>
       </div>
 

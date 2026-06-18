@@ -696,3 +696,5 @@ table.tbl tr:hover td { background: var(--bg-soft); }
   .mg-controls { width: 168px; }
   .mg-dash2 { transform: translateX(-50%) scale(.9); transform-origin: bottom center; }
 }
+
+.mg-bldg { background: rgba(255,107,94,.16) !important; border-color: rgba(255,107,94,.4) !important; }

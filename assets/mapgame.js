@@ -67,6 +67,8 @@
       routeLine: null, destMarker: null, remotes: {}, parkedEl: null,
       last: performance.now(), raf: 0, syncTimer: 0, authMode: 'login',
       onKey: null, onKeyUp: null,
+      buildings: [], bldgCenter: null, bldgLayer: null, bldgFetching: false,
+      bldgLast: 0, buildingsOn: true, bldgRenderer: L.canvas({ padding: 0.5 }),
     };
 
     buildCarIcon($('#mg-car-rot'), G.carModel);
@@ -148,6 +150,7 @@
     $('#mg-mylabel').hidden = false;
     $('#mg-mylabel').textContent = G.user;
     G.playing = true;
+    loadBuildings(G.pos);
     syncNow();
     G.syncTimer = setInterval(syncNow, 180);
   }
@@ -180,6 +183,12 @@
     $('#mg-stop').addEventListener('click', () => { G.route = null; G.distAlong = 0; G.speed = 0; G.walkTarget = null; clearRoute(); });
     $('#mg-toggle').addEventListener('click', toggleMode);
     $('#mg-action').addEventListener('click', toggleMode);
+    $('#mg-bldg').addEventListener('click', () => {
+      G.buildingsOn = !G.buildingsOn;
+      $('#mg-bldg').textContent = '🏢 Walls: ' + (G.buildingsOn ? 'ON' : 'OFF');
+      if (G.buildingsOn) { G.bldgCenter = null; loadBuildings(G.pos); }
+      else drawBuildings();
+    });
 
     // shop
     buildShop();
@@ -336,9 +345,75 @@
   }
   function buildCarIcon(el, id) { if (el) el.innerHTML = carSVG(CARS[id].color); }
 
+  /* ---------------- building collision (OSM footprints) ---------------- */
+  async function loadBuildings(center) {
+    if (!G.buildingsOn || G.bldgFetching) return;
+    const now = Date.now();
+    if (G.bldgCenter && haversine(center, G.bldgCenter) < 400 && now - G.bldgLast < 8000) return;
+    G.bldgFetching = true;
+    const d = 0.006, cl = Math.cos((center.lat * Math.PI) / 180);
+    const s = center.lat - d, n = center.lat + d, w = center.lng - d / cl, e = center.lng + d / cl;
+    const q = `[out:json][timeout:25];(way["building"](${s},${w},${n},${e});relation["building"](${s},${w},${n},${e}););out geom;`;
+    try {
+      const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
+      const data = await r.json();
+      const polys = [];
+      for (const el of data.elements || []) {
+        let rings = [];
+        if (el.type === 'way' && el.geometry) rings = [el.geometry];
+        else if (el.type === 'relation' && el.members) rings = el.members.filter((m) => m.geometry && m.role !== 'inner').map((m) => m.geometry);
+        for (const g of rings) {
+          if (!g || g.length < 3) continue;
+          let minLat = 1e9, maxLat = -1e9, minLng = 1e9, maxLng = -1e9;
+          const pts = g.map((p) => {
+            if (p.lat < minLat) minLat = p.lat; if (p.lat > maxLat) maxLat = p.lat;
+            if (p.lon < minLng) minLng = p.lon; if (p.lon > maxLng) maxLng = p.lon;
+            return { lat: p.lat, lng: p.lon };
+          });
+          polys.push({ minLat, maxLat, minLng, maxLng, pts });
+        }
+      }
+      G.buildings = polys; G.bldgCenter = { ...center }; G.bldgLast = Date.now();
+      drawBuildings();
+    } catch (e) {}
+    G.bldgFetching = false;
+  }
+
+  function drawBuildings() {
+    if (G.bldgLayer) { G.map.removeLayer(G.bldgLayer); G.bldgLayer = null; }
+    if (!G.buildingsOn) return;
+    G.bldgLayer = L.layerGroup();
+    for (const b of G.buildings) {
+      L.polygon(b.pts.map((p) => [p.lat, p.lng]), {
+        renderer: G.bldgRenderer, interactive: false,
+        color: '#ff6b5e', weight: 1, opacity: 0.45,
+        fill: true, fillColor: '#ff6b5e', fillOpacity: 0.13,
+      }).addTo(G.bldgLayer);
+    }
+    G.bldgLayer.addTo(G.map);
+  }
+
+  function pointInPoly(lat, lng, pts) {
+    let inside = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const yi = pts[i].lat, xi = pts[i].lng, yj = pts[j].lat, xj = pts[j].lng;
+      if (((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  }
+  function blocked(lat, lng) {
+    if (!G.buildingsOn) return false;
+    for (const b of G.buildings) {
+      if (lat < b.minLat || lat > b.maxLat || lng < b.minLng || lng > b.maxLng) continue;
+      if (pointInPoly(lat, lng, b.pts)) return true;
+    }
+    return false;
+  }
+
   /* ---------------- multiplayer sync ---------------- */
   async function syncNow() {
     if (!G || !G.playing) return;
+    loadBuildings(G.pos);
     try {
       const r = await fetch('/api/world/sync', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -422,7 +497,12 @@
         G.route = null; clearRoute();
       } else {
         const p2 = routePosition(G.distAlong);
-        G.pos = { lat: p2.lat, lng: p2.lng }; G.heading = p2.heading;
+        if (blocked(p2.lat, p2.lng)) {
+          // wall ahead (e.g. straight-line shortcut) — stop, don't drive through
+          G.distAlong -= G.speed * dt; G.speed = 0;
+        } else {
+          G.pos = { lat: p2.lat, lng: p2.lng }; G.heading = p2.heading;
+        }
       }
     } else {
       G.speed = Math.max(0, G.speed - car.brake * dt);
@@ -456,8 +536,15 @@
     if (spd > 0.05) G.heading = (Math.atan2(G.walkVel.e, G.walkVel.n) * 180) / Math.PI;
     G.speed = spd;
     const cl = Math.cos((G.pos.lat * Math.PI) / 180);
-    G.pos.lat += (G.walkVel.n * dt) / EARTH;
-    G.pos.lng += (G.walkVel.e * dt) / (EARTH * cl);
+    let nlat = G.pos.lat + (G.walkVel.n * dt) / EARTH;
+    let nlng = G.pos.lng + (G.walkVel.e * dt) / (EARTH * cl);
+    if (blocked(nlat, nlng)) {
+      // slide along the wall instead of stopping dead
+      if (!blocked(G.pos.lat, nlng)) { nlat = G.pos.lat; }
+      else if (!blocked(nlat, G.pos.lng)) { nlng = G.pos.lng; }
+      else { nlat = G.pos.lat; nlng = G.pos.lng; G.walkVel.e *= 0.2; G.walkVel.n *= 0.2; }
+    }
+    G.pos.lat = nlat; G.pos.lng = nlng;
   }
 
   /* ---------------- rendering ---------------- */
