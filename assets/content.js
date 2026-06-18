@@ -578,6 +578,7 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
       <div class="mg-ent mg-person" id="mg-person" hidden><div class="mg-person-rot" id="mg-person-rot">
         <div class="mg-p-body"></div><div class="mg-p-face"></div>
       </div></div>
+      <div class="mg-axe" id="mg-axe" hidden>🪓</div>
       <div class="mg-mylabel" id="mg-mylabel" hidden></div>
 
       <!-- remote players + parked cars get injected here -->

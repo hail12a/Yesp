@@ -75,7 +75,7 @@
       forestFetching: false, forestLast: 0, forestCenter: null, treeCutsLoaded: false,
       inside: null, insideBld: null, doorEls: new Map(), nearDoor: null,
       intCv: null, intW: 0, intH: 0,
-      inventory: loadInventory(), invSel: null,
+      inventory: loadInventory(), invSel: null, cutting: null,
       respawning: false, respawnTarget: null, respawnMarker: null, respawnPrevView: null,
     };
 
@@ -207,6 +207,7 @@
       if (k === 'escape') { if (!$('#mg-respawn-bar').hidden) cancelRespawn(); else closePanels(); return; }
       if (k === 'e') { primaryAction(); return; }
       if (k === 'f' && G.inside) { G.inside.interact(); return; }
+      if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k) && G.cutting) cancelCut();
       if ((G.mode === 'walk' || G.inside) && ['w', 'a', 's', 'd', 'shift', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
         G.keys[k] = true; G.walkTarget = null;
       }
@@ -252,10 +253,18 @@
   function loadInventory() {
     try {
       const raw = localStorage.getItem('yesp-mg-inv');
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const inv = JSON.parse(raw);
+        // ensure every player has an axe (added after the first inventory ship)
+        if (Array.isArray(inv) && !inv.some((it) => it.id === 'axe')) {
+          inv.unshift({ id: 'axe', icon: '🪓', name: 'Axe', qty: 1, desc: 'A felling axe. On foot, stand next to a tree and press E (T on mobile) to chop it — 3 swings fells it for 3 logs.' });
+        }
+        return inv;
+      }
     } catch (e) {}
     // starter kit
     return [
+      { id: 'axe',     icon: '🪓', name: 'Axe',           qty: 1, desc: 'A felling axe. On foot, stand next to a tree and press E (T on mobile) to chop it — 3 swings fells it for 3 logs.' },
       { id: 'map',     icon: '🗺️', name: 'City Map',      qty: 1, desc: 'A folded map of the city. Handy for getting your bearings.' },
       { id: 'keys',    icon: '🔑', name: 'Car Keys',      qty: 1, desc: 'The keys to your current vehicle.' },
       { id: 'phone',   icon: '📱', name: 'Phone',         qty: 1, desc: 'Stay connected on the move.' },
@@ -438,12 +447,83 @@
      or enter/leave the car. Priority: inside > doorway > car. */
   function primaryAction() {
     if (!G || !G.playing) return;
+    if (G.cutting) return; // busy chopping
     if (G.inside) { exitBuilding(); return; }
     // Car wins if you're within 10 m of it — prevents accidental building entry
     if (G.mode === 'walk' && G.nearDoor && haversine(G.pos, G.carPos) > 10) {
       enterBuilding(G.nearDoor); return;
     }
+    // On foot with an axe, near a tree → start chopping
+    if (G.mode === 'walk' && hasItem('axe')) {
+      const tr = nearestTree(G.pos, 3.2);
+      if (tr && haversine(G.pos, G.carPos) > 6) { startCutTree(tr); return; }
+    }
     toggleMode();
+  }
+
+  /* ---------------- tree felling (axe) ---------------- */
+  function hasItem(id) { return G.inventory.some((it) => it.id === id && it.qty > 0); }
+  function addItem(id, icon, name, qty, desc) {
+    const ex = G.inventory.find((it) => it.id === id);
+    if (ex) ex.qty += qty; else G.inventory.push({ id, icon, name, qty, desc });
+    saveInventory();
+  }
+
+  function startCutTree(tree) {
+    if (G.cutting) return;
+    // face the tree
+    const dLat = tree.lat - G.pos.lat, dLng = (tree.lng - G.pos.lng) * Math.cos((G.pos.lat * Math.PI) / 180);
+    G.heading = (Math.atan2(dLng, dLat) * 180) / Math.PI;
+    G.cutting = { tree, swings: 0, t: 0, done: false };
+    G.keys = {}; G.joy.active = false; G.joy.x = G.joy.y = 0;
+    $('#mg-axe').hidden = false;
+    $('#mg-hint').textContent = 'Chopping… (3 swings)';
+  }
+
+  // Called each frame while G.cutting is set; advances the swing animation.
+  // One full swing cycle per second, 3 swings to fell a tree → 3 logs.
+  function stepCut(dt) {
+    const c = G.cutting; if (!c) return;
+    c.t += dt;
+    // swing angle: sweep a 90° arc in front, one cycle (down-and-back) per second
+    const phase = c.t % 1;               // 0..1 within the current swing
+    const sweep = Math.sin(phase * Math.PI); // 0→1→0 ease
+    const ang = G.heading - 45 + sweep * 90;  // 90° arc centred on facing dir
+    const axe = $('#mg-axe');
+    // pivot at the player, blade thrown ~34px out in the facing direction
+    axe.style.transform = `translate(-50%, -50%) rotate(${ang}deg) translate(0, -34px)`;
+    // count a completed swing each time we pass a 1-second boundary
+    const swingNo = Math.floor(c.t);
+    if (swingNo > c.swings) {
+      c.swings = swingNo;
+      $('#mg-hint').textContent = `Chopping… ${Math.min(3, c.swings)}/3`;
+      if (c.swings >= 3) finishCutTree();
+    }
+  }
+
+  function cancelCut() {
+    if (!G.cutting) return;
+    G.cutting = null;
+    $('#mg-axe').hidden = true;
+    $('#mg-hint').textContent = TOUCH ? 'Joystick to walk · reach the car · T to enter.' : 'WASD to walk · Shift to run · E to enter the car.';
+  }
+
+  function finishCutTree() {
+    const c = G.cutting; if (!c || c.done) return;
+    c.done = true;
+    const tree = c.tree;
+    G.cutting = null;
+    $('#mg-axe').hidden = true;
+    // fell it locally + persist to the shared world
+    G.treeCuts.add(tree.id);
+    drawTrees();
+    addItem('log', '🪵', 'Log', 3, 'Rough-cut timber from a felled tree. Used for building.');
+    if ($('#mg-inv') && !$('#mg-inv').hidden) renderInventory();
+    $('#mg-hint').textContent = 'Tree felled — +3 logs. ' + (TOUCH ? 'T to enter the car.' : 'E to enter the car.');
+    fetch('/api/world/tree_cut', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: G.token, id: tree.id, lat: tree.lat, lng: tree.lng }),
+    }).catch(() => {});
   }
 
   /* ---------------- building interiors ---------------- */
@@ -904,7 +984,9 @@
         stepInterior(dt);
         updateAction();
       } else {
-        if (G.mode === 'drive') stepDrive(dt); else stepWalk(dt);
+        if (G.cutting) stepCut(dt);
+        else if (G.mode === 'drive') stepDrive(dt);
+        else stepWalk(dt);
         G.map.setView([G.pos.lat, G.pos.lng], G.map.getZoom(), { animate: false });
         renderLocal();
         renderRemotes(dt);
@@ -1042,9 +1124,13 @@
   function updateAction() {
     const a = $('#mg-action');
     if (!TOUCH) return;
+    if (G.cutting) { a.disabled = true; a.textContent = 'Chopping…'; return; }
     if (G.inside) { a.disabled = false; a.textContent = 'Exit building (T)'; return; }
     if (G.mode === 'walk') {
       if (G.nearDoor) { a.disabled = false; a.textContent = 'Enter building (T)'; return; }
+      if (hasItem('axe') && haversine(G.pos, G.carPos) > 6 && nearestTree(G.pos, 3.2)) {
+        a.disabled = false; a.textContent = '🪓 Chop tree (T)'; return;
+      }
       const near = haversine(G.pos, G.carPos) <= 10;
       a.disabled = !near;
       a.textContent = near ? 'Enter car (T)' : 'Walk to a car/door';

@@ -685,6 +685,14 @@ table.tbl tr:hover td { background: var(--bg-soft); }
 .mg-inv-detail { padding: 10px 13px 13px; font-size: 12.5px; color: #b6bfc9; border-top: 1px solid rgba(255,255,255,.08); min-height: 30px; }
 .mg-inv-detail b { color: #eef2f6; }
 
+/* axe swing overlay (centred on the local player while chopping) */
+.mg-axe {
+  position: absolute; left: 50%; top: 50%; z-index: 540; pointer-events: none;
+  font-size: 26px; line-height: 1; transform-origin: 50% 50%;
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,.6));
+  will-change: transform;
+}
+
 /* respawn picker bar */
 .mg-respawn-bar {
   position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 690;
