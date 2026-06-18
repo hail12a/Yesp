@@ -70,6 +70,9 @@
       onKey: null, onKeyUp: null,
       buildings: [], bldgCenter: null, bldgLayer: null, bldgFetching: false,
       bldgLast: 0, buildingsOn: true, bldgRenderer: L.canvas({ padding: 0.5 }),
+      forests: [], trees: [], treeCuts: new Set(), treeLayer: null,
+      treeRenderer: L.canvas({ padding: 0.5 }),
+      forestFetching: false, forestLast: 0, forestCenter: null, treeCutsLoaded: false,
       inside: null, insideBld: null, doorEls: new Map(), nearDoor: null,
       intCv: null, intW: 0, intH: 0,
       inventory: loadInventory(), invSel: null,
@@ -181,7 +184,9 @@
     // force-reload buildings at the actual spawn position (may differ from the
     // pre-loaded Vienna default); empty the cache so the guard skips immediately
     G.buildings = []; G.bldgCenter = null;
+    G.forests = []; G.forestCenter = null;
     loadBuildings(G.pos);
+    loadTreeCuts().then(() => loadForests(G.pos));
     syncNow();
     G.syncTimer = setInterval(syncNow, 180);
   }
@@ -344,9 +349,11 @@
     $('#mg-toggle').textContent = '🚶 Leave car (E)';
     endRespawnUI();
     G.map.setView([t.lat, t.lng], 17, { animate: true });
-    // reload buildings around the new spot
+    // reload buildings + forests around the new spot
     G.buildings = []; G.bldgCenter = null;
+    G.forests = []; G.forestCenter = null;
     loadBuildings(G.pos);
+    loadForests(G.pos);
     syncNow();
   }
   function cancelRespawn() {
@@ -613,6 +620,20 @@
   }
 
   /* ---------------- helpers ---------------- */
+  function hashStr(s) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
   function haversine(a, b) {
     const R = 6371000, toR = Math.PI / 180;
     const dLat = (b.lat - a.lat) * toR, dLng = (b.lng - a.lng) * toR;
@@ -700,6 +721,118 @@
     }
     return inside;
   }
+
+  /* ---------------- forests + trees (OSM woodland) ---------------- */
+  // Fetch the persisted set of already-cut trees once, on join
+  async function loadTreeCuts() {
+    try {
+      const r = await fetch('/api/world/state');
+      const d = await r.json();
+      if (d && d.trees) for (const id in d.trees) G.treeCuts.add(id);
+    } catch (e) {}
+    G.treeCutsLoaded = true;
+  }
+
+  async function loadForests(center) {
+    if (G.forestFetching) return;
+    const now = Date.now();
+    if (G.forests.length > 0 && G.forestCenter && haversine(center, G.forestCenter) < 300 && now - G.forestLast < 60000) return;
+    G.forestFetching = true;
+    const d = 0.006, cl = Math.cos((center.lat * Math.PI) / 180);
+    const s = center.lat - d, n = center.lat + d, w = center.lng - d / cl, e = center.lng + d / cl;
+    // woodland + forest polygons; tree rows are handled as point clouds we generate ourselves
+    const q = `[out:json][timeout:25];(way["natural"="wood"](${s},${w},${n},${e});way["landuse"="forest"](${s},${w},${n},${e});relation["natural"="wood"](${s},${w},${n},${e});relation["landuse"="forest"](${s},${w},${n},${e}););out geom;`;
+    try {
+      const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
+      const data = await r.json();
+      const polys = [];
+      for (const el of data.elements || []) {
+        let rings = [];
+        if (el.type === 'way' && el.geometry) rings = [el.geometry];
+        else if (el.type === 'relation' && el.members) rings = el.members.filter((m) => m.geometry && m.role !== 'inner').map((m) => m.geometry);
+        for (let gi = 0; gi < rings.length; gi++) {
+          const g = rings[gi];
+          if (!g || g.length < 3) continue;
+          let minLat = 1e9, maxLat = -1e9, minLng = 1e9, maxLng = -1e9;
+          const pts = g.map((p) => {
+            if (p.lat < minLat) minLat = p.lat; if (p.lat > maxLat) maxLat = p.lat;
+            if (p.lon < minLng) minLng = p.lon; if (p.lon > maxLng) maxLng = p.lon;
+            return { lat: p.lat, lng: p.lon };
+          });
+          polys.push({ id: 'f' + (el.id || 'x') + '_' + gi, minLat, maxLat, minLng, maxLng, pts });
+        }
+      }
+      G.forests = polys; G.forestCenter = { ...center }; G.forestLast = Date.now();
+      generateTrees(center);
+      drawTrees();
+    } catch (e) {}
+    G.forestFetching = false;
+  }
+
+  // Deterministic scatter: same forest polygon always yields the same trees
+  function genTreesForPolygon(poly) {
+    const rnd = mulberry32(hashStr(poly.id));
+    const out = [];
+    const midLat = (poly.minLat + poly.maxLat) / 2;
+    const mLat = EARTH, mLng = EARTH * Math.cos((midLat * Math.PI) / 180);
+    const spacing = 8; // metres between trees
+    const dLat = spacing / mLat, dLng = spacing / mLng;
+    let count = 0;
+    for (let la = poly.minLat + dLat * 0.5; la <= poly.maxLat && count < 500; la += dLat) {
+      for (let ln = poly.minLng + dLng * 0.5; ln <= poly.maxLng && count < 500; ln += dLng) {
+        const jla = la + (rnd() - 0.5) * dLat * 0.85;
+        const jln = ln + (rnd() - 0.5) * dLng * 0.85;
+        if (rnd() < 0.30) continue; // natural clearings
+        if (!pointInPoly(jla, jln, poly.pts)) continue;
+        out.push({ id: 't_' + Math.round(jla * 1e5) + '_' + Math.round(jln * 1e5), lat: jla, lng: jln });
+        count++;
+      }
+    }
+    return out;
+  }
+
+  function generateTrees(center) {
+    const trees = [];
+    const seenId = new Set();
+    for (const poly of G.forests) {
+      for (const t of genTreesForPolygon(poly)) {
+        if (seenId.has(t.id)) continue;
+        seenId.add(t.id);
+        trees.push(t);
+        if (trees.length >= 1200) break;
+      }
+      if (trees.length >= 1200) break;
+    }
+    G.trees = trees;
+  }
+
+  function drawTrees() {
+    if (G.treeLayer) { G.map.removeLayer(G.treeLayer); G.treeLayer = null; }
+    G.treeLayer = L.layerGroup();
+    for (const t of G.trees) {
+      if (G.treeCuts.has(t.id)) continue; // already harvested
+      // canopy
+      L.circleMarker([t.lat, t.lng], {
+        renderer: G.treeRenderer, interactive: false,
+        radius: 4.5, color: '#1f3d1c', weight: 1, opacity: 0.8,
+        fill: true, fillColor: '#2f6b27', fillOpacity: 0.85,
+      }).addTo(G.treeLayer);
+    }
+    G.treeLayer.addTo(G.map);
+  }
+
+  // Nearest standing tree within `maxM` metres of a point (for the axe)
+  function nearestTree(pos, maxM) {
+    let best = null, bd = maxM;
+    for (const t of G.trees) {
+      if (G.treeCuts.has(t.id)) continue;
+      const dLat = Math.abs(t.lat - pos.lat), dLng = Math.abs(t.lng - pos.lng);
+      if (dLat > 0.001 || dLng > 0.001) continue; // quick bbox reject (~100 m)
+      const d = haversine(pos, t);
+      if (d < bd) { bd = d; best = t; }
+    }
+    return best;
+  }
   function blocked(lat, lng) {
     if (!G.buildingsOn) return false;
     for (const b of G.buildings) {
@@ -713,6 +846,7 @@
   async function syncNow() {
     if (!G || !G.playing) return;
     loadBuildings(G.pos);
+    loadForests(G.pos);
     localStorage.setItem('yesp-mg-pos', JSON.stringify({ lat: G.pos.lat, lng: G.pos.lng }));
     try {
       const r = await fetch('/api/world/sync', {
