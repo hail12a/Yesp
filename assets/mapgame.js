@@ -297,8 +297,11 @@
      or enter/leave the car. Priority: inside > doorway > car. */
   function primaryAction() {
     if (!G || !G.playing) return;
-    if (G.inside) { exitBuilding(); return; }   // E always exits the building
-    if (G.mode === 'walk' && G.nearDoor) { enterBuilding(G.nearDoor); return; }
+    if (G.inside) { exitBuilding(); return; }
+    // Car wins if you're within 10 m of it — prevents accidental building entry
+    if (G.mode === 'walk' && G.nearDoor && haversine(G.pos, G.carPos) > 10) {
+      enterBuilding(G.nearDoor); return;
+    }
     toggleMode();
   }
 
@@ -314,7 +317,7 @@
     // park the avatar in the doorway so other players see you there
     G.mode = 'walk';
     G.pos = { lat: bld._entry.lat, lng: bld._entry.lng };
-    G.carPos = { ...G.pos };
+    // intentionally do NOT move G.carPos — car stays where it was parked
     // swap the view
     $('#mg-car').hidden = true;
     $('#mg-person').hidden = true;
@@ -338,8 +341,8 @@
     // step out ≈3 m clear of the wall, on foot
     if (b && b._entry) {
       const o = b._entry.out;
-      G.pos = { lat: b._entry.lat + o.lat * 3, lng: b._entry.lng + o.lng * 3 };
-      G.carPos = { ...G.pos };
+      // step 4 m outward from the door wall; car stays where it was parked
+      G.pos = { lat: b._entry.lat + o.lat * 4, lng: b._entry.lng + o.lng * 4 };
     }
     G.mode = 'walk';
     $('#mg-person').hidden = false;
@@ -406,7 +409,10 @@
         layer.appendChild(el);
         G.doorEls.set(b._id, el);
       }
-      const p = G.map.latLngToContainerPoint([ent.lat, ent.lng]);
+      // show bubble 4 m outside the wall so it's clearly in the street
+      const bubLat = ent.lat + ent.out.lat * 4;
+      const bubLng = ent.lng + ent.out.lng * 4;
+      const p = G.map.latLngToContainerPoint([bubLat, bubLng]);
       el.style.left = p.x + 'px'; el.style.top = p.y + 'px';
       const enterable = dist < 6;
       el.classList.toggle('near', enterable);

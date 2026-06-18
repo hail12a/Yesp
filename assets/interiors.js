@@ -162,28 +162,37 @@
   }
 
   /* ================================================================
-     FLOOR COLOUR PALETTE  —  warm, realistic apartment look
+     FLOOR COLOUR PALETTE  —  region-aware warm tones
      ================================================================ */
-  const FLOOR_CLR = {
-    'Living Room': '#C8A870',  // warm oak parquet
-    'Kitchen':     '#D0CCC2',  // light stone tile
-    'Bathroom':    '#C8D4DC',  // cool porcelain tile
-    'Bedroom':     '#C4A46A',  // parquet (amber)
-    'Entrance':    '#BEB8AE',  // stone entry
-    'Hallway':     '#C6C2BA',  // light corridor tile
-    'Shop floor':  '#C8C4BC',
-    'Office':      '#BAC0C8',
-    'generic':     '#C0B8A8',
+  const FLOOR_STYLES = {
+    vienna: { living: '#C8A870', kitchen: '#D0CCC2', bath: '#C8D4DC', bed: '#C4A46A', entry: '#BEB8AE', hall: '#C6C2BA', sofa: '#7A5C38', bed_frame: '#4E6278', wood: '#6A4A2E', counter: '#9EA8B2', rug: '#6A3E7A' },
+    eastern:{ living: '#BEB090', kitchen: '#CCCAC4', bath: '#C4D0D8', bed: '#B8A862', entry: '#B6B2AA', hall: '#C0BCB4', sofa: '#5A5848', bed_frame: '#485868', wood: '#5A4828', counter: '#8A9298', rug: '#5A3060' },
+    med:    { living: '#D4B080', kitchen: '#D8D2C4', bath: '#CAD8D0', bed: '#CEA868', entry: '#C4BEB2', hall: '#CCC8C0', sofa: '#8A6848', bed_frame: '#4A5A78', wood: '#784E2A', counter: '#A0A8A0', rug: '#7A4E3A' },
   };
-  function floorColor(type) {
-    if (!type) return FLOOR_CLR.generic;
-    if (type.startsWith('Bedroom')) return FLOOR_CLR.Bedroom;
-    if (type.startsWith('Office') || type.startsWith('Room')) return FLOOR_CLR.Office;
-    return FLOOR_CLR[type] || FLOOR_CLR.generic;
+  function getStyle(opts) { return FLOOR_STYLES[opts && opts.style] || FLOOR_STYLES.vienna; }
+
+  function floorColor(type, style) {
+    const s = FLOOR_STYLES[style] || FLOOR_STYLES.vienna;
+    if (!type) return '#C0B8A8';
+    if (type.startsWith('Bedroom')) return s.bed;
+    if (type.startsWith('Office') || type.startsWith('Room')) return '#BAC0C8';
+    const m = { 'Living Room': s.living, 'Kitchen': s.kitchen, 'Bathroom': s.bath, 'Entrance': s.entry, 'Hallway': s.hall, 'Shop floor': '#C8C4BC' };
+    return m[type] || '#C0B8A8';
+  }
+
+  // Detect region style from lat/lng
+  function detectStyle(lat, lng) {
+    // Vienna + Central Europe
+    if (lat > 47.0 && lat < 49.5 && lng > 13.0 && lng < 18.0) return 'vienna';
+    // Russia / Eastern Europe
+    if (lng > 25 && (lat > 50 || (lat > 44 && lng > 36))) return 'eastern';
+    // Mediterranean
+    if (lat > 35 && lat < 46 && lng > -5 && lng < 28) return 'med';
+    return 'vienna';
   }
 
   /* ================================================================
-     FURNITURE  —  wall-hugging only, clears door gaps by GAP_CLEAR m
+     FURNITURE  —  wall-hugging, door-gap-aware, region-styled
      ================================================================ */
   const GAP_CLEAR = 1.0;
 
@@ -198,62 +207,90 @@
     return false;
   }
 
-  function furnish(room, rnd, out, gaps) {
+  function furnish(room, rnd, out, gaps, style) {
     const { x: rx, y: ry, w: rw, h: rh, type: t } = room;
     if (!t) return;
+    const S = getStyle({ style });
     const ok = (fx, fy, fw, fh) => fw > 0 && fh > 0 && !doorBlocked(fx, fy, fw, fh, gaps);
     const push = (fx, fy, fw, fh, kind, color, solid) => { if (ok(fx, fy, fw, fh)) out.push({ x: fx, y: fy, w: fw, h: fh, kind, color, solid: solid !== false }); };
+    const dec = (fx, fy, fw, fh, kind, color) => out.push({ x: fx, y: fy, w: fw, h: fh, kind, color, solid: false });
 
     if (t === 'Kitchen') {
-      // L-shaped counter: along S wall and W wall, near corners
-      const cT = 0.65; // counter depth
-      // South wall counter (full width minus door side margin)
-      push(rx + cT + 0.1, ry + 0.04, rw - cT - 0.2, cT, 'counter', '#9EA8B2', true);
-      // West wall counter arm (runs up from SW corner)
-      const armH = Math.min(rh * 0.50, 2.8);
-      push(rx + 0.04, ry + 0.04, cT, armH, 'counter', '#9EA8B2', true);
-      // Stove inset on south counter
-      push(rx + cT + 0.2, ry + 0.10, 0.75, 0.48, 'stove', '#383E46', true);
-      // Upper wall cabinet (non-solid visual, N wall)
-      const cabW = Math.min(rw * 0.55, 2.2);
-      push(rx + (rw - cabW) / 2, ry + rh - 0.04 - 0.55, cabW, 0.55, 'cabinet', '#8A9098', false);
+      const cT = 0.65;
+      // South-wall counter (full run, L-join corner)
+      push(rx + cT, ry + 0.04, rw - cT - 0.05, cT, 'counter', S.counter, true);
+      // West-wall counter arm
+      const armH = Math.min(rh * 0.52, 3.0);
+      push(rx + 0.04, ry + 0.04, cT, armH, 'counter', S.counter, true);
+      // Stove on south counter
+      push(rx + cT + 0.15, ry + 0.10, 0.78, 0.46, 'stove', '#383E46', true);
+      // Fridge: far W corner
+      push(rx + 0.04, ry + armH + 0.05, cT, Math.min(0.80, rh - armH - 0.15), 'fridge', '#D0D8DC', true);
+      // Upper cabinets on N wall
+      const cabW = Math.min(rw * 0.60, 2.6);
+      dec(rx + (rw - cabW) / 2, ry + rh - 0.05 - 0.52, cabW, 0.52, 'cabinet', '#909AA4');
+      // Sink marker (inset on south counter)
+      push(rx + rw - 0.04 - 0.72, ry + 0.12, 0.68, 0.40, 'sink', '#B8C8D4', true);
 
     } else if (t === 'Bathroom') {
-      // Toilet: NW corner
-      push(rx + 0.04, ry + rh - 0.04 - 0.70, 0.45, 0.70, 'toilet', '#EAF2F6', true);
-      // Sink: NE corner
-      push(rx + rw - 0.04 - 0.55, ry + rh - 0.04 - 0.50, 0.55, 0.50, 'sink', '#D8E6EE', true);
-      // Shower/tub: W wall, lower half
-      if (rw > 1.9 && rh > 2.2) push(rx + 0.04, ry + 0.04, Math.min(0.85, rw * 0.40), Math.min(rh * 0.48, 1.70), 'tub', '#C8DEE8', true);
+      // Toilet: always far corner from door
+      push(rx + 0.04, ry + rh - 0.05 - 0.72, 0.46, 0.72, 'toilet', '#EAF2F6', true);
+      // Sink vanity unit: opposite side
+      push(rx + rw - 0.05 - 0.70, ry + rh - 0.05 - 0.52, 0.70, 0.52, 'sink', '#D4E4EE', true);
+      // Bathtub / shower: along W wall
+      if (rw > 2.0 && rh > 2.4) {
+        const tubH = Math.min(rh * 0.46, 1.80);
+        push(rx + 0.04, ry + 0.04, Math.min(0.90, rw * 0.42), tubH, 'tub', '#C4DCE8', true);
+      }
+      // Small mirror / shelf above sink (non-solid)
+      dec(rx + rw - 0.05 - 0.65, ry + rh - 0.05 - 0.52 - 0.22, 0.60, 0.18, 'mirror', '#C0D8E8');
 
     } else if (t === 'Entrance') {
-      push(rx + 0.04, ry + 0.04, 0.28, Math.min(rh * 0.45, 1.1), 'coatrack', '#5A4838', true);
-      push(rx + rw - 0.04 - 0.85, ry + 0.04, 0.85, 0.28, 'shoecab', '#6A5040', true);
+      push(rx + 0.04, ry + 0.04, 0.28, Math.min(rh * 0.48, 1.20), 'coatrack', S.wood, true);
+      push(rx + rw - 0.05 - 0.90, ry + 0.04, 0.90, 0.30, 'shoecab', S.wood, true);
+      // Hall mirror (non-solid)
+      dec(rx + rw * 0.3, ry + rh * 0.15, rw * 0.35, rh * 0.45, 'mirror', '#C8D4DC');
 
     } else if (t.startsWith('Bedroom')) {
-      // Bed centred against N wall
-      const bW = Math.min(1.85, rw - 1.0), bH = Math.min(2.05, rh - 0.9);
+      const isFirst = t === 'Bedroom 1';
+      // Bed centred against N wall (away from entry side)
+      const bW = Math.min(1.90, rw - 1.0), bH = Math.min(2.10, rh - 0.9);
       const bX = rx + (rw - bW) / 2;
-      push(bX, ry + rh - 0.04 - bH, bW, bH, 'bed', '#5C6E8A', true);
-      // Nightstand right of bed
-      push(bX + bW + 0.05, ry + rh - 0.04 - 0.48, 0.44, 0.44, 'nightstand', '#7A6045', true);
-      // Wardrobe: NW corner
-      push(rx + 0.04, ry + rh - 0.04 - 0.58, Math.min(1.30, rw * 0.38), 0.58, 'wardrobe', '#6A4A30', true);
+      push(bX, ry + rh - 0.05 - bH, bW, bH, 'bed', S.bed_frame, true);
+      // Headboard visual
+      dec(bX, ry + rh - 0.05 - bH, bW, 0.28, 'headboard', S.wood);
+      // Nightstand(s)
+      push(bX - 0.50, ry + rh - 0.05 - 0.50, 0.46, 0.46, 'nightstand', S.wood, true);
+      push(bX + bW + 0.04, ry + rh - 0.05 - 0.50, 0.46, 0.46, 'nightstand', S.wood, true);
+      // Wardrobe: NW corner (sliding)
+      const wW = Math.min(1.60, rw * 0.42);
+      push(rx + 0.04, ry + rh - 0.05 - 0.60, wW, 0.60, 'wardrobe', S.wood, true);
+      // Desk in NE corner for bedroom 2 / study feel
+      if (!isFirst && rw > 3.2) {
+        push(rx + rw - 0.05 - 1.20, ry + 0.04, 1.20, 0.65, 'desk', S.wood, true);
+        push(rx + rw - 0.05 - 0.80, ry + 0.04 + 0.70, 0.50, 0.50, 'chair', '#4A4840', true);
+      }
+      // Rug under bed
+      dec(bX - 0.25, ry + rh - 0.05 - bH - 0.40, bW + 0.50, bH + 0.45, 'rug', S.rug);
 
     } else if (t === 'Living Room') {
-      // Sofa along S wall, centred
-      const sfW = Math.min(2.6, rw - 1.0), sfH = 0.90;
-      push(rx + (rw - sfW) / 2, ry + 0.04, sfW, sfH, 'sofa', '#8A6A4A', true);
-      // TV on N wall
-      const tvW = Math.min(1.70, rw * 0.48);
-      push(rx + (rw - tvW) / 2, ry + rh - 0.04 - 0.22, tvW, 0.22, 'tv', '#1A1E24', true);
-      // Coffee table (not solid)
-      const tbW = Math.min(1.10, rw * 0.30);
-      out.push({ x: rx + (rw - tbW) / 2, y: ry + 0.04 + sfH + 0.38, w: tbW, h: 0.55, kind: 'table', color: '#9A7050', solid: false });
-      // Rug under table+sofa area
-      out.push({ x: rx + (rw - tbW - 0.7) / 2, y: ry + 0.04 + sfH + 0.10, w: tbW + 0.7, h: 1.0, kind: 'rug', color: '#6A4E7A', solid: false });
+      const sfW = Math.min(2.80, rw - 0.9), sfH = 0.92;
+      // Sofa against S wall
+      push(rx + (rw - sfW) / 2, ry + 0.04, sfW, sfH, 'sofa', S.sofa, true);
+      // Armchair on one side
+      push(rx + 0.04, ry + 0.04 + sfH + 0.25, 0.80, 0.80, 'armchair', S.sofa, true);
+      // TV unit on N wall
+      const tvW = Math.min(1.90, rw * 0.50), tvH = 0.38;
+      push(rx + (rw - tvW) / 2, ry + rh - 0.05 - tvH, tvW, tvH, 'tv-unit', '#282C34', true);
+      // Bookshelf on E wall (tall, narrow)
+      if (rh > 4.0) push(rx + rw - 0.05 - 0.42, ry + 0.04 + sfH + 0.10, 0.42, Math.min(rh * 0.45, 1.80), 'bookshelf', S.wood, true);
+      // Decorative: rug, coffee table
+      const tbW = Math.min(1.20, rw * 0.32), tbH = 0.60;
+      dec(rx + (rw - tbW - 0.6) / 2, ry + 0.04 + sfH + 0.08, tbW + 0.6, tbH + 0.8, 'rug', S.rug);
+      dec(rx + (rw - tbW) / 2, ry + 0.04 + sfH + 0.36, tbW, tbH, 'table', '#9A7050');
+      // Plant in corner
+      dec(rx + rw - 0.05 - 0.38, ry + 0.04, 0.38, 0.38, 'plant', '#3A6830');
     }
-    // Bedrooms and other rooms left empty per user request (designable later)
   }
 
   /* ================================================================
@@ -337,9 +374,12 @@
       }
     }
 
-    for (const r of rooms) { r.area = r.w * r.h; r.color = floorColor(r.type); furnish(r, rnd, furniture, gaps); }
+    const style = opts.style || 'vienna';
+    for (const r of rooms) { r.area = r.w * r.h; r.color = floorColor(r.type, style); furnish(r, rnd, furniture, gaps, style); }
 
-    const spawn  = innerSpawn(entry, W, H, walls);
+    // Spawn in the centre of the Living Room — guaranteed open, away from all walls
+    const lr = rooms.find(r => r.type === 'Living Room');
+    const spawn = lr ? { x: lr.x + lr.w / 2, y: lr.y + lr.h / 2 } : innerSpawn(entry, W, H, walls);
     const portals = [{ kind: 'exit', x: entry.x, y: entry.y, label: opts.exitLabel || 'EXIT' }];
     return { W, H, walls, rooms, furniture, portals, spawn, gaps };
   }
@@ -379,7 +419,9 @@
     return { kind: 'shop', W, H, walls, rooms, furniture, portals: [{ kind: 'exit', x: entry.x, y: entry.y, label: 'EXIT' }], spawn };
   }
 
-  function buildHallway(seed, W, H, entry, kind) {
+  function buildHallway(seed, W, H, entry, kind, opts) {
+    opts = opts || {};
+    const style = opts.style || 'vienna';
     const rnd = rng(seed), walls = [], rooms = [], furniture = [], portals = [];
     const unitWord = kind === 'hotel' ? 'Room' : kind === 'office' ? 'Office' : 'Apt';
     const horiz = W >= H, longLen = horiz ? W : H, shortLen = horiz ? H : W;
@@ -390,7 +432,7 @@
     perimeterWalls(W, H, null, walls);
     const XY = (al, cr) => horiz ? { x: al, y: cr } : { x: cr, y: al };
     const corr = horiz ? { x: 0, y: c0, w: W, h: HW } : { x: c0, y: 0, w: HW, h: H };
-    corr.type = 'Hallway'; corr.area = corr.w * corr.h; corr.color = floorColor('Hallway');
+    corr.type = 'Hallway'; corr.area = corr.w * corr.h; corr.color = floorColor('Hallway', style);
     rooms.push(corr);
     const K = clamp(Math.round(longLen / 10), 1, 8), secLen = longLen / K;
     const sides = twoSided ? ['low','high'] : [(c0 === 0) ? 'high' : 'low'];
@@ -440,10 +482,11 @@
     ensureEntry(b);
     if (PLAN_CACHE.has(b._id)) return PLAN_CACHE.get(b._id);
     const seed = hashStr(b._id), rnd = rng(seed ^ 0x9e3779b9), title = buildingTitle(b._kind, b._info.tags, rnd);
+    const style = detectStyle(b._entry.lat, b._entry.lng);
     let plan;
     if (b._kind === 'shop') plan = buildShop(seed, b._W, b._H, b._entry);
-    else if (['apartments','hotel','office'].includes(b._kind)) plan = buildHallway(seed, b._W, b._H, b._entry, b._kind);
-    else plan = buildHouse(seed, b._W, b._H, b._entry);
+    else if (['apartments','hotel','office'].includes(b._kind)) plan = buildHallway(seed, b._W, b._H, b._entry, b._kind, { style });
+    else plan = buildHouse(seed, b._W, b._H, b._entry, { style });
     plan.title = title; PLAN_CACHE.set(b._id, plan); logVisit(b._id); return plan;
   }
 
@@ -459,7 +502,8 @@
     else if (e.side === 'N') { entry.y = UH; entry.x = clamp(UW / 2, DOOR_W, UW - DOOR_W); }
     else if (e.side === 'W') { entry.x = 0;  entry.y = clamp(UH / 2, DOOR_W, UH - DOOR_W); }
     else                     { entry.x = UW; entry.y = clamp(UH / 2, DOOR_W, UH - DOOR_W); }
-    const plan = buildHouse(seed, UW, UH, entry, { exitLabel: 'EXIT' });
+    const style = detectStyle(b._entry.lat, b._entry.lng);
+    const plan = buildHouse(seed, UW, UH, entry, { exitLabel: 'EXIT', style });
     plan.title = portal.label; PLAN_CACHE.set(key, plan); logVisit(key); return plan;
   }
 
