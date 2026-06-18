@@ -78,6 +78,10 @@
     wireAuth();
     wireGame();
 
+    // pre-load buildings for the default spawn area immediately so they're
+    // ready (or close to it) by the time the player spawns in
+    loadBuildings(start);
+
     G.raf = requestAnimationFrame(loop);
   }
 
@@ -171,6 +175,9 @@
     $('#mg-mylabel').hidden = false;
     $('#mg-mylabel').textContent = G.user;
     G.playing = true;
+    // force-reload buildings at the actual spawn position (may differ from the
+    // pre-loaded Vienna default); empty the cache so the guard skips immediately
+    G.buildings = []; G.bldgCenter = null;
     loadBuildings(G.pos);
     syncNow();
     G.syncTimer = setInterval(syncNow, 180);
@@ -498,7 +505,8 @@
   async function loadBuildings(center) {
     if (!G.buildingsOn || G.bldgFetching) return;
     const now = Date.now();
-    if (G.bldgCenter && haversine(center, G.bldgCenter) < 400 && now - G.bldgLast < 8000) return;
+    // re-fetch if: moved > 300 m, OR it's been 60 s, OR buildings list is still empty
+    if (G.buildings.length > 0 && G.bldgCenter && haversine(center, G.bldgCenter) < 300 && now - G.bldgLast < 60000) return;
     G.bldgFetching = true;
     const d = 0.006, cl = Math.cos((center.lat * Math.PI) / 180);
     const s = center.lat - d, n = center.lat + d, w = center.lng - d / cl, e = center.lng + d / cl;
@@ -654,12 +662,7 @@
         G.route = null; clearRoute();
       } else {
         const p2 = routePosition(G.distAlong);
-        if (blocked(p2.lat, p2.lng)) {
-          // wall ahead (e.g. straight-line shortcut) — stop, don't drive through
-          G.distAlong -= G.speed * dt; G.speed = 0;
-        } else {
-          G.pos = { lat: p2.lat, lng: p2.lng }; G.heading = p2.heading;
-        }
+        G.pos = { lat: p2.lat, lng: p2.lng }; G.heading = p2.heading;
       }
     } else {
       G.speed = Math.max(0, G.speed - car.brake * dt);
