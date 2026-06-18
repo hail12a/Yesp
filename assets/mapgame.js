@@ -72,6 +72,8 @@
       bldgLast: 0, buildingsOn: true, bldgRenderer: L.canvas({ padding: 0.5 }),
       inside: null, insideBld: null, doorEls: new Map(), nearDoor: null,
       intCv: null, intW: 0, intH: 0,
+      inventory: loadInventory(), invSel: null,
+      respawning: false, respawnTarget: null, respawnMarker: null, respawnPrevView: null,
     };
 
     buildCarIcon($('#mg-car-rot'), G.carModel);
@@ -170,6 +172,7 @@
     G.carPos = { ...G.pos };
     $('#mg-auth').style.display = 'none';
     $('#mg-controls').hidden = false;
+    $('#mg-topbar').hidden = false;
     $('#mg-dash2').hidden = false;
     $('#mg-car').hidden = false;
     $('#mg-mylabel').hidden = false;
@@ -187,6 +190,7 @@
   function wireGame() {
     G.map.on('click', (e) => {
       if (!G.playing) return;
+      if (G.respawning) { pickRespawn(e.latlng); return; }
       if (G.mode === 'drive') routeTo(e.latlng);
       else G.walkTarget = { lat: e.latlng.lat, lng: e.latlng.lng };
     });
@@ -194,6 +198,8 @@
 
     G.onKey = (e) => {
       const k = e.key.toLowerCase();
+      if (k === 'i' && G.playing && !G.inside) { const v = $('#mg-inv'); const show = v.hidden; closePanels(); if (show) openInventory(); return; }
+      if (k === 'escape') { if (!$('#mg-respawn-bar').hidden) cancelRespawn(); else closePanels(); return; }
       if (k === 'e') { primaryAction(); return; }
       if (k === 'f' && G.inside) { G.inside.interact(); return; }
       if ((G.mode === 'walk' || G.inside) && ['w', 'a', 's', 'd', 'shift', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
@@ -218,7 +224,135 @@
     $('#mg-shopbtn').addEventListener('click', () => { $('#mg-shop').hidden = !$('#mg-shop').hidden; });
     $('#mg-shop-close').addEventListener('click', () => { $('#mg-shop').hidden = true; });
 
+    // menu + inventory + respawn
+    $('#mg-menu-btn').addEventListener('click', () => { const m = $('#mg-menu'); const show = m.hidden; closePanels(); m.hidden = !show; });
+    $('#mg-menu-close').addEventListener('click', () => { $('#mg-menu').hidden = true; });
+    $('#mg-inv-btn').addEventListener('click', () => { const v = $('#mg-inv'); const show = v.hidden; closePanels(); if (show) openInventory(); });
+    $('#mg-inv-close').addEventListener('click', () => { $('#mg-inv').hidden = true; });
+    $('#mg-menu-inv').addEventListener('click', () => { closePanels(); openInventory(); });
+    $('#mg-menu-shop').addEventListener('click', () => { closePanels(); $('#mg-shop').hidden = false; });
+    $('#mg-menu-respawn').addEventListener('click', () => { closePanels(); startRespawn(); });
+    $('#mg-menu-logout').addEventListener('click', logout);
+    $('#mg-respawn-confirm').addEventListener('click', confirmRespawn);
+    $('#mg-respawn-cancel').addEventListener('click', cancelRespawn);
+
     if (TOUCH) { $('#mg-action').hidden = false; wireJoystick(); }
+  }
+
+  function closePanels() {
+    $('#mg-menu').hidden = true; $('#mg-inv').hidden = true; $('#mg-shop').hidden = true;
+  }
+
+  /* ---------------- inventory ---------------- */
+  function loadInventory() {
+    try {
+      const raw = localStorage.getItem('yesp-mg-inv');
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    // starter kit
+    return [
+      { id: 'map',     icon: '🗺️', name: 'City Map',      qty: 1, desc: 'A folded map of the city. Handy for getting your bearings.' },
+      { id: 'keys',    icon: '🔑', name: 'Car Keys',      qty: 1, desc: 'The keys to your current vehicle.' },
+      { id: 'phone',   icon: '📱', name: 'Phone',         qty: 1, desc: 'Stay connected on the move.' },
+      { id: 'coffee',  icon: '☕', name: 'Coffee',        qty: 2, desc: 'A warm cup to keep you going.' },
+      { id: 'cash',    icon: '💶', name: 'Cash',          qty: 250, desc: 'Euro notes. Spend it in the garage later.' },
+    ];
+  }
+  function saveInventory() {
+    try { localStorage.setItem('yesp-mg-inv', JSON.stringify(G.inventory)); } catch (e) {}
+  }
+  function openInventory() {
+    $('#mg-inv').hidden = false;
+    renderInventory();
+  }
+  function renderInventory() {
+    const grid = $('#mg-inv-grid');
+    const SLOTS = 20;
+    let html = '';
+    for (let i = 0; i < SLOTS; i++) {
+      const it = G.inventory[i];
+      if (it) {
+        const sel = G.invSel === it.id ? ' sel' : '';
+        const qty = it.qty > 1 ? `<span class="mg-inv-qty">${it.qty}</span>` : '';
+        html += `<button class="mg-inv-slot${sel}" data-id="${it.id}" title="${escapeH(it.name)}">${it.icon}${qty}</button>`;
+      } else {
+        html += `<div class="mg-inv-slot empty"></div>`;
+      }
+    }
+    grid.innerHTML = html;
+    grid.querySelectorAll('.mg-inv-slot[data-id]').forEach((b) =>
+      b.addEventListener('click', () => {
+        G.invSel = b.dataset.id;
+        renderInventory();
+        const it = G.inventory.find((x) => x.id === G.invSel);
+        if (it) $('#mg-inv-detail').innerHTML = `<b>${escapeH(it.name)}</b> ×${it.qty}<br>${escapeH(it.desc)}`;
+      }));
+    if (!G.invSel) $('#mg-inv-detail').textContent = 'Select an item to inspect it.';
+  }
+
+  function logout() {
+    localStorage.removeItem('yesp-mg-token');
+    localStorage.removeItem('yesp-mg-user');
+    location.reload();
+  }
+
+  /* ---------------- respawn picker ---------------- */
+  function startRespawn() {
+    if (!G.playing || G.respawning) return;
+    if (G.inside) exitBuilding();
+    G.respawning = true;
+    G.respawnTarget = null;
+    G.route = null; clearRoute(); G.speed = 0; G.walkTarget = null;
+    G.respawnPrevView = { center: G.map.getCenter(), zoom: G.map.getZoom() };
+    // hide the player overlays while choosing
+    $('#mg-car').hidden = true; $('#mg-person').hidden = true; $('#mg-mylabel').hidden = true;
+    $('#mg-controls').hidden = true; $('#mg-dash2').hidden = true;
+    $('#mg-respawn-bar').hidden = false;
+    $('#mg-respawn-confirm').disabled = true;
+    hideDoors();
+    // zoom out to a world / regional view centred on the player
+    G.map.setView([G.pos.lat, G.pos.lng], 4, { animate: true });
+  }
+  function pickRespawn(latlng) {
+    G.respawnTarget = { lat: latlng.lat, lng: latlng.lng };
+    if (G.respawnMarker) { G.respawnMarker.setLatLng(latlng); }
+    else {
+      G.respawnMarker = L.marker(latlng, {
+        icon: L.divIcon({ className: 'mg-respawn-pin', html: '📍', iconSize: [30, 30], iconAnchor: [15, 28] }),
+      }).addTo(G.map);
+    }
+    $('#mg-respawn-confirm').disabled = false;
+    $('#mg-respawn-txt').textContent = 'Marker placed — zoom in for precision, then confirm. Click again to move it.';
+  }
+  function endRespawnUI() {
+    G.respawning = false;
+    if (G.respawnMarker) { try { G.map.removeLayer(G.respawnMarker); } catch (e) {} G.respawnMarker = null; }
+    $('#mg-respawn-bar').hidden = true;
+    $('#mg-controls').hidden = false; $('#mg-dash2').hidden = false;
+    $('#mg-car').hidden = G.mode !== 'drive';
+    $('#mg-person').hidden = G.mode !== 'walk';
+    $('#mg-mylabel').hidden = false;
+    $('#mg-respawn-txt').textContent = 'Pan & zoom the world, then click where you want to respawn.';
+  }
+  function confirmRespawn() {
+    if (!G.respawnTarget) return;
+    const t = G.respawnTarget;
+    G.pos = { lat: t.lat, lng: t.lng };
+    G.carPos = { lat: t.lat, lng: t.lng };
+    G.mode = 'drive';
+    $('#mg-mode').textContent = '🚗 Driving';
+    $('#mg-toggle').textContent = '🚶 Leave car (E)';
+    endRespawnUI();
+    G.map.setView([t.lat, t.lng], 17, { animate: true });
+    // reload buildings around the new spot
+    G.buildings = []; G.bldgCenter = null;
+    loadBuildings(G.pos);
+    syncNow();
+  }
+  function cancelRespawn() {
+    const v = G.respawnPrevView;
+    endRespawnUI();
+    if (v) G.map.setView(v.center, v.zoom, { animate: true });
   }
 
   function buildShop() {
@@ -631,7 +765,7 @@
     let dt = (now - G.last) / 1000; G.last = now;
     if (dt > 0.1) dt = 0.1;
 
-    if (G.playing) {
+    if (G.playing && !G.respawning) {
       if (G.inside) {
         stepInterior(dt);
         updateAction();

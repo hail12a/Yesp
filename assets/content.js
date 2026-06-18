@@ -522,6 +522,37 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
         <div class="mg-hint" id="mg-hint">Click the map → drive there. Scroll to zoom.</div>
       </div>
 
+      <!-- top-right menu + inventory buttons -->
+      <div class="mg-topbar" id="mg-topbar" hidden>
+        <button class="mg-iconbtn" id="mg-inv-btn" title="Inventory (I)">🎒</button>
+        <button class="mg-iconbtn" id="mg-menu-btn" title="Menu">☰</button>
+      </div>
+
+      <!-- MAIN MENU -->
+      <div class="mg-menu" id="mg-menu" hidden>
+        <div class="mg-menu-head"><span>Menu</span><button id="mg-menu-close">✕</button></div>
+        <button class="mg-menu-item" id="mg-menu-respawn">🎯 Respawn — pick a new location</button>
+        <button class="mg-menu-item" id="mg-menu-inv">🎒 Inventory</button>
+        <button class="mg-menu-item" id="mg-menu-shop">🛒 Garage / Shop</button>
+        <button class="mg-menu-item mg-menu-danger" id="mg-menu-logout">🚪 Log out</button>
+      </div>
+
+      <!-- INVENTORY -->
+      <div class="mg-inv" id="mg-inv" hidden>
+        <div class="mg-inv-head"><span>Inventory</span><button id="mg-inv-close">✕</button></div>
+        <div class="mg-inv-grid" id="mg-inv-grid"></div>
+        <div class="mg-inv-detail" id="mg-inv-detail">Select an item to inspect it.</div>
+      </div>
+
+      <!-- RESPAWN PICKER bar -->
+      <div class="mg-respawn-bar" id="mg-respawn-bar" hidden>
+        <div class="mg-respawn-txt" id="mg-respawn-txt">Pan &amp; zoom the world, then click where you want to respawn.</div>
+        <div class="mg-respawn-btns">
+          <button class="mg-respawn-confirm" id="mg-respawn-confirm" disabled>Spawn here ▸</button>
+          <button class="mg-respawn-cancel" id="mg-respawn-cancel">Cancel</button>
+        </div>
+      </div>
+
       <!-- SHOP -->
       <div class="mg-shop" id="mg-shop" hidden>
         <div class="mg-shop-head"><span>Garage</span><button id="mg-shop-close">✕</button></div>

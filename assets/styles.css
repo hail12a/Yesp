@@ -612,7 +612,7 @@ table.tbl tr:hover td { background: var(--bg-soft); }
 
 /* shop */
 .mg-shop {
-  position: absolute; top: 12px; right: 12px; z-index: 650; width: 230px;
+  position: absolute; top: 62px; right: 12px; z-index: 650; width: 230px;
   background: color-mix(in srgb, #11151c 92%, transparent);
   border: 1px solid rgba(255,255,255,.14); border-radius: 12px; color: #eef2f6;
   box-shadow: 0 8px 30px rgba(0,0,0,.45); overflow: hidden;
@@ -630,6 +630,81 @@ table.tbl tr:hover td { background: var(--bg-soft); }
 .mg-car-info { display: flex; flex-direction: column; line-height: 1.25; }
 .mg-car-info b { font-size: 14px; }
 .mg-car-info span { font-size: 11.5px; color: #aeb7c1; }
+
+/* top-right menu / inventory bar */
+.mg-topbar { position: absolute; top: 12px; right: 12px; z-index: 660; display: flex; gap: 8px; }
+.mg-iconbtn {
+  width: 42px; height: 42px; border-radius: 11px; cursor: pointer; font-size: 19px;
+  background: color-mix(in srgb, #11151c 88%, transparent); backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,.16); color: #eef2f6;
+  box-shadow: 0 6px 22px rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center;
+}
+.mg-iconbtn:hover { background: rgba(255,255,255,.14); }
+
+/* main menu */
+.mg-menu {
+  position: absolute; top: 62px; right: 12px; z-index: 670; width: 250px;
+  background: color-mix(in srgb, #11151c 94%, transparent); backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,.14); border-radius: 12px; color: #eef2f6;
+  box-shadow: 0 12px 40px rgba(0,0,0,.5); overflow: hidden;
+}
+.mg-menu-head { display: flex; justify-content: space-between; align-items: center; padding: 11px 13px; font-weight: 800; border-bottom: 1px solid rgba(255,255,255,.1); }
+.mg-menu-head button { background: none; border: none; color: #cdd5de; font-size: 16px; cursor: pointer; }
+.mg-menu-item {
+  display: block; width: 100%; text-align: left; padding: 12px 14px; cursor: pointer;
+  background: none; border: none; border-bottom: 1px solid rgba(255,255,255,.06);
+  color: #eef2f6; font-size: 14px;
+}
+.mg-menu-item:hover { background: rgba(255,255,255,.08); }
+.mg-menu-danger { color: #ff9a8a; }
+
+/* inventory */
+.mg-inv {
+  position: absolute; top: 62px; right: 12px; z-index: 670; width: 300px;
+  background: color-mix(in srgb, #11151c 94%, transparent); backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,.14); border-radius: 12px; color: #eef2f6;
+  box-shadow: 0 12px 40px rgba(0,0,0,.5); overflow: hidden;
+}
+.mg-inv-head { display: flex; justify-content: space-between; align-items: center; padding: 11px 13px; font-weight: 800; border-bottom: 1px solid rgba(255,255,255,.1); }
+.mg-inv-head button { background: none; border: none; color: #cdd5de; font-size: 16px; cursor: pointer; }
+.mg-inv-grid {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; padding: 10px;
+}
+.mg-inv-slot {
+  aspect-ratio: 1; border-radius: 9px; cursor: pointer; position: relative;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+  display: flex; align-items: center; justify-content: center; font-size: 22px;
+}
+.mg-inv-slot:hover { background: rgba(255,255,255,.12); }
+.mg-inv-slot.sel { border-color: var(--accent); background: rgba(217,119,87,.20); }
+.mg-inv-slot.empty { cursor: default; opacity: .45; font-size: 0; }
+.mg-inv-qty {
+  position: absolute; right: 3px; bottom: 2px; font-size: 10.5px; font-weight: 800;
+  color: #fff; text-shadow: 0 1px 2px #000; pointer-events: none;
+}
+.mg-inv-detail { padding: 10px 13px 13px; font-size: 12.5px; color: #b6bfc9; border-top: 1px solid rgba(255,255,255,.08); min-height: 30px; }
+.mg-inv-detail b { color: #eef2f6; }
+
+/* respawn picker bar */
+.mg-respawn-bar {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 690;
+  display: flex; flex-direction: column; gap: 9px; align-items: center; padding: 12px 16px;
+  background: color-mix(in srgb, #11151c 90%, transparent); backdrop-filter: blur(10px);
+  border: 1px solid var(--accent); border-radius: 13px; color: #eef2f6;
+  box-shadow: 0 10px 36px rgba(0,0,0,.5); max-width: 90vw;
+}
+.mg-respawn-txt { font-size: 13px; text-align: center; }
+.mg-respawn-btns { display: flex; gap: 8px; }
+.mg-respawn-confirm {
+  padding: 8px 16px; border-radius: 9px; cursor: pointer; font-weight: 700;
+  background: var(--accent); border: none; color: #fff;
+}
+.mg-respawn-confirm:disabled { opacity: .4; cursor: not-allowed; }
+.mg-respawn-cancel {
+  padding: 8px 14px; border-radius: 9px; cursor: pointer;
+  background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); color: #eef2f6;
+}
+.mg-respawn-cancel:hover { background: rgba(255,255,255,.16); }
 
 /* compact bottom dashboard */
 .mg-dash2 {
