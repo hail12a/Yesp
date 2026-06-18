@@ -471,62 +471,89 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
 '/map-drive': {
   section: 'drive', title: 'Map Drive',
   html: () => `
-    <span class="eyebrow">LIVE SATELLITE · DRIVE & WALK</span>
+    <span class="eyebrow">LIVE SATELLITE · MULTIPLAYER</span>
     <h1>Map Drive</h1>
-    <p class="lead">A real satellite map you can drive on. <strong>Right-click</strong> anywhere and the car routes there along real roads with proper acceleration, cornering and braking. Hop out and walk around as a person at realistic speed.</p>
+    <p class="lead">Make an account, spawn into a shared satellite world, and drive real roads with other players. Pick from sedans and a humble Golf 1.9 SDI, hop out and walk around — everyone sees your name and your parked car.</p>
 
     <div class="mg-wrap" id="mg-wrap">
       <div id="mg-map"></div>
 
+      <!-- AUTH / SPAWN overlay -->
+      <div class="mg-auth" id="mg-auth">
+        <div class="mg-auth-card">
+          <div class="mg-auth-stage" id="mg-stage-auth">
+            <h2>Map Drive</h2>
+            <div class="mg-auth-tabs" id="mg-auth-tabs">
+              <button class="active" data-at="login">Log in</button>
+              <button data-at="register">Create account</button>
+            </div>
+            <input id="mg-user" placeholder="username" autocomplete="username" maxlength="16" />
+            <input id="mg-pass" type="password" placeholder="password" autocomplete="current-password" />
+            <button class="mg-auth-go" id="mg-auth-go">Log in &amp; continue</button>
+            <div class="mg-auth-msg" id="mg-auth-msg"></div>
+          </div>
+
+          <div class="mg-auth-stage" id="mg-stage-spawn" hidden>
+            <h2>Choose a spawn</h2>
+            <p class="mg-welcome" id="mg-welcome"></p>
+            <div class="mg-spawn-list" id="mg-spawn-list"></div>
+            <button class="mg-auth-go" id="mg-spawn-go">Spawn ▸</button>
+          </div>
+        </div>
+      </div>
+
       <!-- top-left controls -->
-      <div class="mg-panel mg-controls">
+      <div class="mg-panel mg-controls" id="mg-controls" hidden>
         <div class="mg-mode" id="mg-mode">🚗 Driving</div>
         <div class="mg-row">
           <input id="mg-setspeed" type="number" value="50" min="0" max="280" />
           <span class="mg-unit">km/h</span>
-          <button id="mg-setbtn">Set limit</button>
+          <button id="mg-setbtn">Set</button>
         </div>
         <div class="mg-row mg-presets" id="mg-presets">
           <button data-v="30">30</button><button data-v="50">50</button>
           <button data-v="80">80</button><button data-v="130">130</button>
         </div>
-        <button class="mg-toggle" id="mg-toggle">🚶 Leave car</button>
-        <button class="mg-stop" id="mg-stop">■ Stop</button>
-        <div class="mg-hint" id="mg-hint">Right-click the map → drive there. Scroll to zoom.</div>
+        <div class="mg-row mg-btnrow">
+          <button class="mg-shopbtn" id="mg-shopbtn">🛒 Shop</button>
+          <button class="mg-stop" id="mg-stop">■ Stop</button>
+        </div>
+        <button class="mg-toggle" id="mg-toggle">🚶 Leave car (E)</button>
+        <div class="mg-hint" id="mg-hint">Click the map → drive there. Scroll to zoom.</div>
       </div>
 
-      <!-- bottom-right dashboard -->
-      <div class="mg-panel mg-dash">
-        <div class="mg-gauges">
-          <div class="mg-gauge">
-            <canvas id="mg-speedo" width="180" height="180"></canvas>
-            <div class="mg-digi"><b id="mg-kmh">0</b><span>km/h</span></div>
-          </div>
-          <div class="mg-gauge">
-            <canvas id="mg-tach" width="130" height="130"></canvas>
-            <div class="mg-gear" id="mg-gear">N</div>
-          </div>
+      <!-- SHOP -->
+      <div class="mg-shop" id="mg-shop" hidden>
+        <div class="mg-shop-head"><span>Garage</span><button id="mg-shop-close">✕</button></div>
+        <div class="mg-shop-list" id="mg-shop-list"></div>
+      </div>
+
+      <!-- bottom dashboard (compact) -->
+      <div class="mg-dash2" id="mg-dash2" hidden>
+        <canvas id="mg-speedo" width="120" height="120"></canvas>
+        <div class="mg-dash-nums">
+          <div class="mg-kmh-wrap"><b id="mg-kmh">0</b><span>km/h</span></div>
+          <div class="mg-rpm-wrap"><b id="mg-rpm">900</b><span>rpm</span></div>
+          <div class="mg-gear-wrap">Gear <b id="mg-gear">N</b></div>
         </div>
       </div>
 
-      <!-- centered vehicle / person overlays -->
-      <div class="mg-ent mg-car" id="mg-car"><div class="mg-car-rot" id="mg-car-rot">
-        <svg viewBox="0 0 40 72" width="34" height="60">
-          <rect x="6" y="4" width="28" height="64" rx="10" fill="#e23b3b" stroke="#7a1414" stroke-width="2"/>
-          <rect x="9" y="10" width="22" height="16" rx="5" fill="#1c2230"/>
-          <rect x="9" y="40" width="22" height="18" rx="5" fill="#2a3346"/>
-          <rect x="2" y="14" width="5" height="12" rx="2" fill="#2a2020"/>
-          <rect x="33" y="14" width="5" height="12" rx="2" fill="#2a2020"/>
-          <rect x="2" y="46" width="5" height="12" rx="2" fill="#2a2020"/>
-          <rect x="33" y="46" width="5" height="12" rx="2" fill="#2a2020"/>
-        </svg>
-      </div></div>
+      <!-- mobile joystick + action button -->
+      <div class="mg-joy" id="mg-joy" hidden><div class="mg-joy-thumb" id="mg-joy-thumb"></div></div>
+      <button class="mg-action" id="mg-action" hidden>Enter (T)</button>
+
+      <!-- centred local entity overlays + label -->
+      <div class="mg-ent mg-car" id="mg-car" hidden><div class="mg-car-rot" id="mg-car-rot"></div></div>
       <div class="mg-ent mg-person" id="mg-person" hidden><div class="mg-person-rot" id="mg-person-rot">
         <div class="mg-p-body"></div><div class="mg-p-face"></div>
       </div></div>
+      <div class="mg-mylabel" id="mg-mylabel" hidden></div>
+
+      <!-- remote players + parked cars get injected here -->
+      <div class="mg-remotes" id="mg-remotes"></div>
     </div>
 
-    <div class="callout info"><span class="ico">🛰️</span><p><strong>Driving:</strong> right-click to set a destination — the car follows real roads, slowing for corners and stopping at the end. Set a speed limit with the km/h box. <strong>On foot:</strong> use <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> (hold <kbd>Shift</kbd> to run) or left-click to walk. Get near the car and press <strong>Enter car</strong>.</p></div>
+    <div class="callout info"><span class="ico">🛰️</span><p><strong>PC:</strong> click the map to drive there · <kbd>WASD</kbd>/<kbd>Shift</kbd> to walk &amp; run · <kbd>E</kbd> to enter/leave the car. <strong>Android:</strong> tap to drive · on-screen joystick to walk · the <strong>T</strong> button to enter/leave. Names float above every player; your parked car shows its model where you left it.</p></div>
   `
 },
 

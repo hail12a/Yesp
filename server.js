@@ -7,6 +7,7 @@ const http  = require("http");
 const https = require("https");
 const fs    = require("fs");
 const path  = require("path");
+const crypto = require("crypto");
 
 const PORT   = process.env.SERVER_PORT || process.env.PORT || 8080;
 const REPO   = process.env.REPO   || "hail12a/Yesp";
@@ -113,6 +114,35 @@ function readBody(req) {
   });
 }
 
+/* ---- accounts (persisted to accounts.json) + multiplayer world (in memory) ---- */
+const ACCT_FILE = path.join(__dirname, "accounts.json");
+let accounts = { secret: "", users: {} };
+try { accounts = JSON.parse(fs.readFileSync(ACCT_FILE, "utf8")); } catch (_) {}
+if (!accounts.secret) accounts.secret = crypto.randomBytes(24).toString("hex");
+if (!accounts.users) accounts.users = {};
+function saveAccounts() {
+  try { fs.writeFileSync(ACCT_FILE, JSON.stringify(accounts)); }
+  catch (e) { console.log("[accounts] save failed:", e.message); }
+}
+function hashPw(pw, salt) {
+  return crypto.pbkdf2Sync(pw, salt, 60000, 32, "sha256").toString("hex");
+}
+function tokenFor(key) {
+  return key + "." + crypto.createHmac("sha256", accounts.secret).update(key).digest("hex").slice(0, 32);
+}
+function userFromToken(t) {
+  if (!t || typeof t !== "string") return null;
+  const i = t.lastIndexOf(".");
+  if (i < 1) return null;
+  const key = t.slice(0, i);
+  return tokenFor(key) === t ? key : null;
+}
+
+const world = {}; // key -> { user, lat, lng, heading, speed, mode, car, carLat, carLng, ts }
+const WORLD_TTL = 15000;
+const numOr = (v, d = 0) => (typeof v === "number" && isFinite(v) ? v : d);
+const strOr = (v, n = 24) => (typeof v === "string" ? v.slice(0, n) : "");
+
 function sendJSON(res, obj, codeNum = 200) {
   res.writeHead(codeNum, {
     "Content-Type": "application/json; charset=utf-8",
@@ -155,6 +185,66 @@ async function handleApi(req, res, urlPath, query) {
     room(m.room || name).messages = [];
     return sendJSON(res, { ok: true });
   }
+
+  /* ---- accounts ---- */
+  if (urlPath === "/api/register" && req.method === "POST") {
+    const m = await readBody(req);
+    const user = strOr(m.user, 16).trim();
+    const pass = String(m.pass || "");
+    if (!/^[A-Za-z0-9_]{3,16}$/.test(user))
+      return sendJSON(res, { error: "Username must be 3–16 letters, numbers or _" }, 400);
+    if (pass.length < 4)
+      return sendJSON(res, { error: "Password must be at least 4 characters" }, 400);
+    const key = user.toLowerCase();
+    if (accounts.users[key]) return sendJSON(res, { error: "That username is taken" }, 409);
+    const salt = crypto.randomBytes(16).toString("hex");
+    accounts.users[key] = { user, salt, hash: hashPw(pass, salt), created: Date.now() };
+    saveAccounts();
+    return sendJSON(res, { ok: true, token: tokenFor(key), user });
+  }
+  if (urlPath === "/api/login" && req.method === "POST") {
+    const m = await readBody(req);
+    const user = strOr(m.user, 16).trim();
+    const pass = String(m.pass || "");
+    const rec = accounts.users[user.toLowerCase()];
+    if (!rec || rec.hash !== hashPw(pass, rec.salt))
+      return sendJSON(res, { error: "Wrong username or password" }, 401);
+    return sendJSON(res, { ok: true, token: tokenFor(user.toLowerCase()), user: rec.user });
+  }
+
+  /* ---- multiplayer world ---- */
+  if (urlPath === "/api/world/sync" && req.method === "POST") {
+    const m = await readBody(req);
+    const key = userFromToken(m.token);
+    if (!key) return sendJSON(res, { error: "Not logged in" }, 401);
+    const rec = accounts.users[key];
+    world[key] = {
+      user: rec ? rec.user : key,
+      lat: numOr(m.lat), lng: numOr(m.lng),
+      heading: numOr(m.heading), speed: numOr(m.speed),
+      mode: strOr(m.mode, 8) || "drive",
+      car: strOr(m.car, 24),
+      carLat: numOr(m.carLat, numOr(m.lat)), carLng: numOr(m.carLng, numOr(m.lng)),
+      ts: Date.now(),
+    };
+    const now = Date.now();
+    const players = [];
+    for (const k in world) {
+      if (now - world[k].ts > WORLD_TTL) { delete world[k]; continue; }
+      if (k !== key) players.push(world[k]);
+    }
+    return sendJSON(res, { ok: true, you: world[key].user, players });
+  }
+  if (urlPath === "/api/world/players" && req.method === "GET") {
+    const now = Date.now();
+    const players = [];
+    for (const k in world) {
+      if (now - world[k].ts > WORLD_TTL) { delete world[k]; continue; }
+      players.push({ user: world[k].user, lat: world[k].lat, lng: world[k].lng });
+    }
+    return sendJSON(res, players);
+  }
+
   return sendJSON(res, { error: "unknown endpoint" }, 404);
 }
 

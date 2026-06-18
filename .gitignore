@@ -2,3 +2,6 @@
 token.txt
 .token
 .env
+
+# runtime data (lives on the server, never in the repo)
+accounts.json
