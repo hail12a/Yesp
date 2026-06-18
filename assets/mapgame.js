@@ -289,7 +289,7 @@
      or enter/leave the car. Priority: inside > doorway > car. */
   function primaryAction() {
     if (!G || !G.playing) return;
-    if (G.inside) { exitBuilding(); return; }
+    if (G.inside) { G.inside.interact(); return; }
     if (G.mode === 'walk' && G.nearDoor) { enterBuilding(G.nearDoor); return; }
     toggleMode();
   }
@@ -301,6 +301,7 @@
     try { session = Interiors.openSession(bld, G.user); } catch (e) { return; }
     G.inside = session;
     G.insideBld = bld;
+    G.intTitle = '';
     G.keys = {}; G.joy.active = false; G.joy.x = G.joy.y = 0;
     // park the avatar in the doorway so other players see you there
     G.mode = 'walk';
@@ -313,10 +314,10 @@
     $('#mg-dash2').hidden = true;
     $('#mg-interior').hidden = false;
     hideDoors();
-    $('#mg-mode').textContent = '🏠 ' + session.plan.title;
-    $('#mg-toggle').textContent = '🚪 Leave building (E)';
-    $('#mg-hint').textContent = TOUCH ? 'Joystick to walk · reach the glowing EXIT · tap T.'
-                                      : 'WASD to walk · Shift to run · reach the glowing EXIT · press E.';
+    $('#mg-mode').textContent = '🏠 ' + session.title();
+    $('#mg-toggle').textContent = '🚪 Use door (E)';
+    $('#mg-hint').textContent = TOUCH ? 'Joystick to walk · doors open on contact · EXIT leaves · tap T to use a door.'
+                                      : 'WASD to walk · Shift to run · walk into doors · reach EXIT to leave · E to use a door.';
     if (TOUCH) { $('#mg-joy').hidden = false; $('#mg-action').hidden = false; $('#mg-action').textContent = 'Exit (T)'; }
     sizeInterior(true);
   }
@@ -360,9 +361,15 @@
 
   function stepInterior(dt) {
     const res = G.inside.step(dt, { keys: G.keys, joy: G.joy });
+    if (res.exited) { exitBuilding(); return; }
+    // reflect the current room / unit in the mode chip
+    const t = G.inside.title();
+    if (t !== G.intTitle) {
+      G.intTitle = t;
+      $('#mg-mode').textContent = '🏠 ' + t;
+    }
     sizeInterior(false);
     G.inside.render($('#mg-interior'));
-    if (res.exited) exitBuilding();
   }
 
   /* ---------------- doorway highlights on the map ----------------
@@ -383,9 +390,11 @@
       live.add(b._id);
       let el = G.doorEls.get(b._id);
       if (!el) {
+        const ico = ({ house: '🏠', apartments: '🏢', hotel: '🏨', office: '🏢', shop: '🏪' })[b._kind] || '🚪';
         el = document.createElement('div');
         el.className = 'mg-door';
-        el.innerHTML = '<span class="mg-door-ring"></span><span class="mg-door-ico">🚪</span>';
+        el.innerHTML = '<span class="mg-door-ring"></span><span class="mg-door-ico">' + ico + '</span>';
+        el.title = (typeof Interiors.describe === 'function') ? Interiors.describe(b) : '';
         layer.appendChild(el);
         G.doorEls.set(b._id, el);
       }
@@ -502,6 +511,7 @@
         let rings = [];
         if (el.type === 'way' && el.geometry) rings = [el.geometry];
         else if (el.type === 'relation' && el.members) rings = el.members.filter((m) => m.geometry && m.role !== 'inner').map((m) => m.geometry);
+        const tags = el.tags || {}; // OSM identity: building=, building:levels, shop, amenity, name…
         for (const g of rings) {
           if (!g || g.length < 3) continue;
           let minLat = 1e9, maxLat = -1e9, minLng = 1e9, maxLng = -1e9;
@@ -510,7 +520,7 @@
             if (p.lon < minLng) minLng = p.lon; if (p.lon > maxLng) maxLng = p.lon;
             return { lat: p.lat, lng: p.lon };
           });
-          polys.push({ minLat, maxLat, minLng, maxLng, pts });
+          polys.push({ minLat, maxLat, minLng, maxLng, pts, tags });
         }
       }
       G.buildings = polys; G.bldgCenter = { ...center }; G.bldgLast = Date.now();
@@ -754,7 +764,7 @@
   function updateAction() {
     const a = $('#mg-action');
     if (!TOUCH) return;
-    if (G.inside) { a.disabled = false; a.textContent = 'Exit (T)'; return; }
+    if (G.inside) { a.disabled = false; a.textContent = 'Use door (T)'; return; }
     if (G.mode === 'walk') {
       if (G.nearDoor) { a.disabled = false; a.textContent = 'Enter building (T)'; return; }
       const near = haversine(G.pos, G.carPos) <= 10;
