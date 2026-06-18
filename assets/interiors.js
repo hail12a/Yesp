@@ -211,173 +211,282 @@
     const { x: rx, y: ry, w: rw, h: rh, type: t } = room;
     if (!t) return;
     const S = getStyle({ style });
-    const ok = (fx, fy, fw, fh) => fw > 0 && fh > 0 && !doorBlocked(fx, fy, fw, fh, gaps);
-    const push = (fx, fy, fw, fh, kind, color, solid) => { if (ok(fx, fy, fw, fh)) out.push({ x: fx, y: fy, w: fw, h: fh, kind, color, solid: solid !== false }); };
-    const dec = (fx, fy, fw, fh, kind, color) => out.push({ x: fx, y: fy, w: fw, h: fh, kind, color, solid: false });
+    const ok = (fx, fy, fw, fh) => fw > 0.08 && fh > 0.08 && !doorBlocked(fx, fy, fw, fh, gaps);
+    const push = (fx, fy, fw, fh, kind, color) => { if (ok(fx, fy, fw, fh)) out.push({ x: fx, y: fy, w: fw, h: fh, kind, color, solid: true }); };
+    const dec  = (fx, fy, fw, fh, kind, color) => { if (fw > 0.05 && fh > 0.05) out.push({ x: fx, y: fy, w: fw, h: fh, kind, color, solid: false }); };
 
     if (t === 'Kitchen') {
       const cT = 0.65;
-      // South-wall counter (full run, L-join corner)
-      push(rx + cT, ry + 0.04, rw - cT - 0.05, cT, 'counter', S.counter, true);
-      // West-wall counter arm
-      const armH = Math.min(rh * 0.52, 3.0);
-      push(rx + 0.04, ry + 0.04, cT, armH, 'counter', S.counter, true);
-      // Stove on south counter
-      push(rx + cT + 0.15, ry + 0.10, 0.78, 0.46, 'stove', '#383E46', true);
-      // Fridge: far W corner
-      push(rx + 0.04, ry + armH + 0.05, cT, Math.min(0.80, rh - armH - 0.15), 'fridge', '#D0D8DC', true);
-      // Upper cabinets on N wall
-      const cabW = Math.min(rw * 0.60, 2.6);
-      dec(rx + (rw - cabW) / 2, ry + rh - 0.05 - 0.52, cabW, 0.52, 'cabinet', '#909AA4');
-      // Sink marker (inset on south counter)
-      push(rx + rw - 0.04 - 0.72, ry + 0.12, 0.68, 0.40, 'sink', '#B8C8D4', true);
+      const kLay = rnd.int(0, 2); // 0=L-shape  1=galley  2=U-shape
+      if (kLay === 0) {
+        // L-shape: S wall + W arm
+        push(rx + 0.04, ry + 0.04, rw - 0.08, cT, 'counter', S.counter);
+        const arm = Math.min(rh * 0.52, 2.8);
+        push(rx + 0.04, ry + 0.04 + cT, cT, arm - cT, 'counter', S.counter);
+        push(rx + 0.10, ry + 0.10, 0.74, 0.44, 'stove', '#383E46');
+        push(rx + rw - 0.08 - 0.66, ry + 0.12, 0.63, 0.38, 'sink', '#B8C8D4');
+        push(rx + 0.04, ry + arm + 0.06, cT, Math.min(0.76, rh - arm - 0.14), 'fridge', '#D2D9DC');
+      } else if (kLay === 1) {
+        // Galley: counters on S and N walls
+        push(rx + 0.04, ry + 0.04, rw - 0.08, cT, 'counter', S.counter);
+        push(rx + 0.04, ry + rh - 0.04 - cT, rw - 0.08, cT, 'counter', S.counter);
+        push(rx + 0.10, ry + 0.10, 0.74, 0.44, 'stove', '#383E46');
+        push(rx + rw - 0.76, ry + 0.12, 0.63, 0.38, 'sink', '#B8C8D4');
+        push(rx + 0.04, ry + rh - 0.04 - cT - 0.77, cT, 0.74, 'fridge', '#D2D9DC');
+      } else {
+        // U-shape: S + W + N walls
+        push(rx + 0.04, ry + 0.04, rw - cT - 0.08, cT, 'counter', S.counter);
+        push(rx + 0.04, ry + 0.04, cT, rh - 0.08, 'counter', S.counter);
+        push(rx + cT + 0.04, ry + rh - 0.04 - cT, rw - cT - 0.08, cT, 'counter', S.counter);
+        push(rx + 0.10, ry + 0.10, 0.74, 0.44, 'stove', '#383E46');
+        push(rx + rw - cT - 0.76, ry + 0.12, 0.63, 0.38, 'sink', '#B8C8D4');
+        push(rx + 0.04, ry + rh * 0.38, cT, 0.76, 'fridge', '#D2D9DC');
+      }
+      // Upper cabinets (decorative)
+      const cabW = Math.min(rw * 0.54, 2.4);
+      dec(rx + (rw - cabW) / 2, ry + rh - 0.08 - 0.46, cabW, 0.46, 'cabinet', '#909AA4');
+      // Dining area if kitchen is roomy enough
+      if (rw >= 3.0 && rh >= 3.4 && rw * rh >= 9.0) {
+        const dtW = Math.min(1.10, rw * 0.36), dtH = 0.65;
+        const dtX = rx + (rw - dtW) / 2, dtY = ry + rh - 0.10 - dtH - 1.0;
+        dec(dtX - 0.12, dtY - 0.12, dtW + 0.24, dtH + 0.24, 'rug', S.rug);
+        dec(dtX, dtY, dtW, dtH, 'table', '#9A7050');
+        push(dtX + dtW * 0.18, dtY - 0.41, 0.38, 0.36, 'chair', '#5A4838');
+        push(dtX + dtW * 0.18, dtY + dtH + 0.06, 0.38, 0.36, 'chair', '#5A4838');
+      }
 
     } else if (t === 'Bathroom') {
-      // Toilet: always far corner from door
-      push(rx + 0.04, ry + rh - 0.05 - 0.72, 0.46, 0.72, 'toilet', '#EAF2F6', true);
-      // Sink vanity unit: opposite side
-      push(rx + rw - 0.05 - 0.70, ry + rh - 0.05 - 0.52, 0.70, 0.52, 'sink', '#D4E4EE', true);
-      // Bathtub / shower: along W wall
-      if (rw > 2.0 && rh > 2.4) {
-        const tubH = Math.min(rh * 0.46, 1.80);
-        push(rx + 0.04, ry + 0.04, Math.min(0.90, rw * 0.42), tubH, 'tub', '#C4DCE8', true);
+      const shower = rnd.chance(0.42);
+      push(rx + 0.04, ry + rh - 0.06 - 0.70, 0.44, 0.70, 'toilet', '#EAF2F6');
+      push(rx + rw - 0.06 - 0.68, ry + rh - 0.06 - 0.50, 0.68, 0.50, 'sink', '#D4E4EE');
+      dec(rx + rw - 0.06 - 0.62, ry + rh - 0.06 - 0.50 - 0.20, 0.58, 0.17, 'mirror', '#C0D8E8');
+      if (shower) {
+        push(rx + 0.04, ry + 0.04, Math.min(0.90, rw * 0.40), Math.min(0.90, rh * 0.38), 'tub', '#B8D0DC');
+      } else if (rw > 2.0 && rh > 2.4) {
+        push(rx + 0.04, ry + 0.04, Math.min(0.88, rw * 0.40), Math.min(rh * 0.44, 1.74), 'tub', '#C4DCE8');
       }
-      // Small mirror / shelf above sink (non-solid)
-      dec(rx + rw - 0.05 - 0.65, ry + rh - 0.05 - 0.52 - 0.22, 0.60, 0.18, 'mirror', '#C0D8E8');
 
     } else if (t === 'Entrance') {
-      push(rx + 0.04, ry + 0.04, 0.28, Math.min(rh * 0.48, 1.20), 'coatrack', S.wood, true);
-      push(rx + rw - 0.05 - 0.90, ry + 0.04, 0.90, 0.30, 'shoecab', S.wood, true);
-      // Hall mirror (non-solid)
-      dec(rx + rw * 0.3, ry + rh * 0.15, rw * 0.35, rh * 0.45, 'mirror', '#C8D4DC');
+      push(rx + 0.04, ry + 0.04, 0.26, Math.min(rh * 0.44, 1.10), 'coatrack', S.wood);
+      push(rx + rw - 0.06 - 0.84, ry + 0.04, 0.84, 0.28, 'shoecab', S.wood);
+      dec(rx + rw * 0.22, ry + rh * 0.08, rw * 0.42, rh * 0.52, 'mirror', '#C8D4DC');
+      push(rx + rw * 0.46, ry + rh - 0.06 - 0.34, Math.min(0.72, rw * 0.28), 0.28, 'table', S.wood);
 
     } else if (t.startsWith('Bedroom')) {
       const isFirst = t === 'Bedroom 1';
-      // Bed centred against N wall (away from entry side)
-      const bW = Math.min(1.90, rw - 1.0), bH = Math.min(2.10, rh - 0.9);
-      const bX = rx + (rw - bW) / 2;
-      push(bX, ry + rh - 0.05 - bH, bW, bH, 'bed', S.bed_frame, true);
-      // Headboard visual
-      dec(bX, ry + rh - 0.05 - bH, bW, 0.28, 'headboard', S.wood);
-      // Nightstand(s)
-      push(bX - 0.50, ry + rh - 0.05 - 0.50, 0.46, 0.46, 'nightstand', S.wood, true);
-      push(bX + bW + 0.04, ry + rh - 0.05 - 0.50, 0.46, 0.46, 'nightstand', S.wood, true);
-      // Wardrobe: NW corner (sliding)
-      const wW = Math.min(1.60, rw * 0.42);
-      push(rx + 0.04, ry + rh - 0.05 - 0.60, wW, 0.60, 'wardrobe', S.wood, true);
-      // Desk in NE corner for bedroom 2 / study feel
-      if (!isFirst && rw > 3.2) {
-        push(rx + rw - 0.05 - 1.20, ry + 0.04, 1.20, 0.65, 'desk', S.wood, true);
-        push(rx + rw - 0.05 - 0.80, ry + 0.04 + 0.70, 0.50, 0.50, 'chair', '#4A4840', true);
+      const bW = Math.min(isFirst ? 1.90 : 1.42, rw - 0.9);
+      const bH = Math.min(isFirst ? 2.10 : 1.90, rh - 0.9);
+      // Randomise which wall the bed hugs: N strongly preferred, then E or W
+      const bedWall = rnd.pick(['N', 'N', 'N', 'E', 'W']);
+      let bX, bY, rotated = false;
+
+      if (bedWall === 'E' && rw > bH + 1.0) {
+        rotated = true; bX = rx + rw - 0.05 - bH; bY = ry + (rh - bW) / 2;
+        push(bX, bY, bH, bW, 'bed', S.bed_frame);
+        dec(bX + bH - 0.26, bY, 0.26, bW, 'headboard', S.wood);
+        push(bX - 0.06 - 0.42, bY + 0.10, 0.42, 0.42, 'nightstand', S.wood);
+        push(bX - 0.06 - 0.42, bY + bW - 0.50, 0.42, 0.42, 'nightstand', S.wood);
+        const wH = Math.min(1.55, rh * 0.40);
+        push(rx + 0.04, ry + rh - 0.05 - wH, 0.58, wH, 'wardrobe', S.wood);
+        if (!isFirst && rw > 3.4) { push(rx + 0.04, ry + 0.05, 1.12, 0.60, 'desk', S.wood); push(rx + 0.04, ry + 0.70, 0.46, 0.46, 'chair', '#4A4840'); }
+        dec(bX - 0.18, bY - 0.28, bH + 0.36, bW + 0.46, 'rug', S.rug);
+      } else if (bedWall === 'W' && rw > bH + 1.0) {
+        rotated = true; bX = rx + 0.05; bY = ry + (rh - bW) / 2;
+        push(bX, bY, bH, bW, 'bed', S.bed_frame);
+        dec(bX, bY, 0.26, bW, 'headboard', S.wood);
+        push(bX + bH + 0.06, bY + 0.10, 0.42, 0.42, 'nightstand', S.wood);
+        push(bX + bH + 0.06, bY + bW - 0.50, 0.42, 0.42, 'nightstand', S.wood);
+        const wH = Math.min(1.55, rh * 0.40);
+        push(rx + rw - 0.06 - 0.58, ry + rh - 0.05 - wH, 0.58, wH, 'wardrobe', S.wood);
+        if (!isFirst && rw > 3.4) { push(rx + rw - 0.06 - 1.12, ry + 0.05, 1.12, 0.60, 'desk', S.wood); push(rx + rw - 0.54, ry + 0.70, 0.46, 0.46, 'chair', '#4A4840'); }
+        dec(bX - 0.18, bY - 0.28, bH + 0.36, bW + 0.46, 'rug', S.rug);
+      } else {
+        // N wall (default)
+        bX = rx + (rw - bW) / 2; bY = ry + rh - 0.05 - bH;
+        push(bX, bY, bW, bH, 'bed', S.bed_frame);
+        dec(bX, bY, bW, 0.26, 'headboard', S.wood);
+        push(bX - 0.06 - 0.42, bY + bH * 0.28, 0.42, 0.42, 'nightstand', S.wood);
+        push(bX + bW + 0.06, bY + bH * 0.28, 0.42, 0.42, 'nightstand', S.wood);
+        const wW = Math.min(1.55, rw * 0.42);
+        push(rx + 0.04, ry + 0.05, wW, 0.58, 'wardrobe', S.wood);
+        if (!isFirst && rw > 3.2) { push(rx + rw - 0.06 - 1.12, ry + 0.05, 1.12, 0.60, 'desk', S.wood); push(rx + rw - 0.58, ry + 0.70, 0.46, 0.46, 'chair', '#4A4840'); }
+        dec(bX - 0.22, bY - 0.36, bW + 0.44, bH + 0.46, 'rug', S.rug);
       }
-      // Rug under bed
-      dec(bX - 0.25, ry + rh - 0.05 - bH - 0.40, bW + 0.50, bH + 0.45, 'rug', S.rug);
 
     } else if (t === 'Living Room') {
-      const sfW = Math.min(2.80, rw - 0.9), sfH = 0.92;
-      // Sofa against S wall
-      push(rx + (rw - sfW) / 2, ry + 0.04, sfW, sfH, 'sofa', S.sofa, true);
-      // Armchair on one side
-      push(rx + 0.04, ry + 0.04 + sfH + 0.25, 0.80, 0.80, 'armchair', S.sofa, true);
-      // TV unit on N wall
-      const tvW = Math.min(1.90, rw * 0.50), tvH = 0.38;
-      push(rx + (rw - tvW) / 2, ry + rh - 0.05 - tvH, tvW, tvH, 'tv-unit', '#282C34', true);
-      // Bookshelf on E wall (tall, narrow)
-      if (rh > 4.0) push(rx + rw - 0.05 - 0.42, ry + 0.04 + sfH + 0.10, 0.42, Math.min(rh * 0.45, 1.80), 'bookshelf', S.wood, true);
-      // Decorative: rug, coffee table
-      const tbW = Math.min(1.20, rw * 0.32), tbH = 0.60;
-      dec(rx + (rw - tbW - 0.6) / 2, ry + 0.04 + sfH + 0.08, tbW + 0.6, tbH + 0.8, 'rug', S.rug);
-      dec(rx + (rw - tbW) / 2, ry + 0.04 + sfH + 0.36, tbW, tbH, 'table', '#9A7050');
-      // Plant in corner
-      dec(rx + rw - 0.05 - 0.38, ry + 0.04, 0.38, 0.38, 'plant', '#3A6830');
+      // Randomise sofa wall: S preferred, then W or E
+      const sfWall = rnd.pick(['S', 'S', 'W', 'E']);
+      const sfW = Math.min(2.70, rw - 0.9), sfH = 0.90;
+
+      if (sfWall === 'S') {
+        push(rx + (rw - sfW) / 2, ry + 0.04, sfW, sfH, 'sofa', S.sofa);
+        push(rx + 0.04, ry + 0.04 + sfH + 0.22, 0.76, 0.76, 'armchair', S.sofa);
+        const tvW = Math.min(1.78, rw * 0.47), tvH = 0.35;
+        push(rx + (rw - tvW) / 2, ry + rh - 0.05 - tvH, tvW, tvH, 'tv-unit', '#282C34');
+        const tbW = Math.min(1.10, rw * 0.30), tbH = 0.56;
+        dec(rx + (rw - tbW - 0.5) / 2, ry + sfH + 0.05, tbW + 0.5, tbH + 0.72, 'rug', S.rug);
+        dec(rx + (rw - tbW) / 2, ry + sfH + 0.28, tbW, tbH, 'table', '#9A7050');
+      } else if (sfWall === 'W') {
+        push(rx + 0.04, ry + (rh - sfW) / 2, sfH, sfW, 'sofa', S.sofa);
+        push(rx + sfH + 0.20, ry + 0.04, 0.76, 0.76, 'armchair', S.sofa);
+        const tvH2 = 0.35, tvW2 = Math.min(1.78, rh * 0.47);
+        push(rx + rw - 0.05 - tvH2, ry + (rh - tvW2) / 2, tvH2, tvW2, 'tv-unit', '#282C34');
+        dec(rx + sfH + 0.04, ry + (rh - 1.05) / 2, 1.12, 1.05, 'rug', S.rug);
+        dec(rx + sfH + 0.28, ry + (rh - 0.56) / 2, 1.05, 0.56, 'table', '#9A7050');
+      } else {
+        push(rx + rw - 0.04 - sfH, ry + (rh - sfW) / 2, sfH, sfW, 'sofa', S.sofa);
+        push(rx + rw - sfH - 0.20 - 0.76, ry + 0.04, 0.76, 0.76, 'armchair', S.sofa);
+        const tvH2 = 0.35, tvW2 = Math.min(1.78, rh * 0.47);
+        push(rx + 0.05, ry + (rh - tvW2) / 2, tvH2, tvW2, 'tv-unit', '#282C34');
+        dec(rx + rw - sfH - 1.12, ry + (rh - 1.05) / 2, 1.12, 1.05, 'rug', S.rug);
+        dec(rx + rw - sfH - 1.06, ry + (rh - 0.56) / 2, 0.98, 0.56, 'table', '#9A7050');
+      }
+      // Bookshelf on long wall
+      if (rh > 3.8) push(rx + rw - 0.06 - 0.40, ry + 0.05, 0.40, Math.min(rh * 0.40, 1.68), 'bookshelf', S.wood);
+      // Dining corner if room is large
+      if (rw >= 4.5 && rh >= 5.0) {
+        const dtW = 1.18, dtH = 0.68;
+        const dtX = rx + rw - 0.10 - dtW, dtY = ry + rh - 0.10 - dtH - 0.96;
+        dec(dtX - 0.14, dtY - 0.14, dtW + 0.28, dtH + 0.28, 'rug', '#7A6A50');
+        dec(dtX, dtY, dtW, dtH, 'table', '#9A7050');
+        push(dtX + 0.18, dtY - 0.42, 0.38, 0.36, 'chair', '#5A4838');
+        push(dtX + 0.18, dtY + dtH + 0.06, 0.38, 0.36, 'chair', '#5A4838');
+      }
+      // Plant corner
+      dec(rx + 0.04, ry + rh - 0.06 - 0.35, 0.35, 0.35, 'plant', '#3A6830');
     }
   }
 
   /* ================================================================
-     ZONE-BASED FLOOR PLAN
-     Day zone (entry side):   Living Room + Kitchen
-     Night zone (far side):   Bedroom(s) + Bathroom
+     REALISTIC APARTMENT FLOOR PLAN
+     Template 0 — Altbau: Entrance hall (Vorraum) + separate rooms
+     Template 1 — Neubau: Open-plan kitchen/living, no hall
+     Template 2 — Klassisch: Compact Altbau without hall, deeper rooms
      ================================================================ */
   function buildZonedPlan(seed, W, H, entry, opts) {
     opts = opts || {};
     const rnd = rng(seed);
     const walls = [], rooms = [], furniture = [], gaps = [];
+    const style = opts.style || 'vienna';
 
     perimeterWalls(W, H, entry, walls, gaps);
 
     const onNS     = entry.side === 'S' || entry.side === 'N';
     const entryLow = entry.side === 'S' || entry.side === 'W';
-    const dayFrac  = rnd.range(0.50, 0.60);
+
+    // 3 layout templates chosen by RNG from seed
+    const tpl = rnd.int(0, 2);
+
+    // Helper: add a room wall between two rooms and record gap
+    const zGap = (vert, fixed, a0, a1, rnd2) => {
+      const at = clamp(rnd2.range(a0 + DOOR_W * 1.2, a1 - DOOR_W * 1.2), a0 + DOOR_W * 0.7, a1 - DOOR_W * 1.5);
+      gapWall(vert, fixed, a0, a1, at - DOOR_W / 2, walls, gaps);
+    };
 
     if (onNS) {
-      const splitY  = entryLow ? H * dayFrac : H * (1 - dayFrac);
-      const dayY    = entryLow ? 0 : splitY,  dayH  = entryLow ? splitY : H - splitY;
-      const nightY  = entryLow ? splitY : 0,  nightH = H - dayH;
+      // ──── N/S entry ───────────────────────────────────────────────
+      const vorH = (tpl === 1) ? 0 : clamp(rnd.range(2.0, 2.6), 1.8, H * 0.20);
 
-      // Zone wall
-      const zdX = clamp(rnd.range(W * 0.28, W * 0.72), DOOR_W + 0.3, W - DOOR_W - 0.3);
-      gapWall(false, splitY, 0, W, zdX - DOOR_W / 2, walls, gaps);
+      // Remainder split: day zone (kitchen+living) vs night zone (beds+bath)
+      const rem     = H - vorH;
+      const dayFrac = (tpl === 0) ? rnd.range(0.44, 0.54) : rnd.range(0.44, 0.58);
+      const dayH    = clamp(rem * dayFrac, 3.8, rem - 3.2);
+      const nightH  = rem - dayH;
 
-      // Day zone — Kitchen left or right, Living Room fills rest
-      const kW = clamp(rnd.range(W * 0.35, W * 0.46), 3.4, W - 3.8);
-      const kitL = rnd.chance(0.5);
-      const kitX = kitL ? 0 : W - kW, livX = kitL ? kW : 0, livW = W - kW;
-      rooms.push({ x: kitX, y: dayY, w: kW, h: dayH, type: 'Kitchen' });
-      rooms.push({ x: livX, y: dayY, w: livW, h: dayH, type: 'Living Room' });
-      gapWall(true, kitL ? kW : W - kW, dayY, dayY + dayH, dayY + dayH * rnd.range(0.35, 0.65) - DOOR_W / 2, walls, gaps);
+      // Anchor everything relative to entry side
+      const eBase   = entryLow ? 0 : H - vorH;
+      const dayBase = entryLow ? vorH : nightH;
+      const ngtBase = entryLow ? vorH + dayH : 0;
 
-      // Night zone — Bathroom corner, then 1-2 bedrooms
-      const bathW = clamp(rnd.range(2.3, 2.9), 2.1, W * 0.32);
+      // ── Vorraum (templates 0 & 2) ──
+      if (vorH > 0) {
+        rooms.push({ x: 0, y: eBase, w: W, h: vorH, type: 'Entrance' });
+        // Wall between Vorraum and day zone with random gap position
+        zGap(false, entryLow ? vorH : H - vorH, 0, W, rnd);
+      }
+
+      // ── Day zone: Kitchen + Living Room ──
+      if (tpl === 1) {
+        // Neubau: open kitchen+living combined (large single room)
+        rooms.push({ x: 0, y: dayBase, w: W, h: dayH, type: 'Living Room' });
+        // Add a kitchen counter strip inside it (decorative sub-zone, not a room wall)
+        // Handled by furnish — Living Room gets extra kitchen furniture when rnd matches
+      } else {
+        const kW = clamp(rnd.range(W * 0.31, W * 0.43), 3.0, W - 3.6);
+        const kitL = rnd.chance(0.5);
+        const kitX = kitL ? 0 : W - kW, livX = kitL ? kW : 0, livW = W - kW;
+        rooms.push({ x: kitX, y: dayBase, w: kW, h: dayH, type: 'Kitchen' });
+        rooms.push({ x: livX, y: dayBase, w: livW, h: dayH, type: 'Living Room' });
+        zGap(true, kitL ? kW : W - kW, dayBase, dayBase + dayH, rnd);
+      }
+
+      // Wall between day and night zones
+      zGap(false, entryLow ? vorH + dayH : nightH, 0, W, rnd);
+
+      // ── Night zone: Bathroom corner + bedroom(s) ──
+      const bathW = clamp(rnd.range(2.1, 2.75), 2.0, W * 0.30);
       const batL  = rnd.chance(0.5);
       const bathX = batL ? 0 : W - bathW, bedX = batL ? bathW : 0, bedW = W - bathW;
-      rooms.push({ x: bathX, y: nightY, w: bathW, h: nightH, type: 'Bathroom' });
-      gapWall(true, batL ? bathW : W - bathW, nightY, nightY + nightH, nightY + nightH * rnd.range(0.35, 0.65) - DOOR_W / 2, walls, gaps);
+      rooms.push({ x: bathX, y: ngtBase, w: bathW, h: nightH, type: 'Bathroom' });
+      zGap(true, batL ? bathW : W - bathW, ngtBase, ngtBase + nightH, rnd);
 
-      if (bedW >= 5.8 && nightH >= 3.2) {
-        const b1W = bedW * rnd.range(0.44, 0.56);
-        gapWall(true, bedX + b1W, nightY, nightY + nightH, nightY + nightH * rnd.range(0.35, 0.65) - DOOR_W / 2, walls, gaps);
-        rooms.push({ x: bedX,        y: nightY, w: b1W,        h: nightH, type: 'Bedroom 1' });
-        rooms.push({ x: bedX + b1W,  y: nightY, w: bedW - b1W, h: nightH, type: 'Bedroom 2' });
+      if (bedW >= 5.5 && nightH >= 3.0) {
+        const b1W = bedW * rnd.range(0.46, 0.58);
+        zGap(true, bedX + b1W, ngtBase, ngtBase + nightH, rnd);
+        rooms.push({ x: bedX,       y: ngtBase, w: b1W,       h: nightH, type: 'Bedroom 1' });
+        rooms.push({ x: bedX + b1W, y: ngtBase, w: bedW - b1W, h: nightH, type: 'Bedroom 2' });
       } else {
-        rooms.push({ x: bedX, y: nightY, w: bedW, h: nightH, type: 'Bedroom 1' });
+        rooms.push({ x: bedX, y: ngtBase, w: bedW, h: nightH, type: 'Bedroom 1' });
       }
 
     } else {
-      // E/W entry: split vertically
-      const splitX  = entryLow ? W * dayFrac : W * (1 - dayFrac);
-      const dayX    = entryLow ? 0 : splitX,  dayW  = entryLow ? splitX : W - splitX;
-      const nightX  = entryLow ? splitX : 0,  nightW = W - dayW;
+      // ──── E/W entry ───────────────────────────────────────────────
+      const vorW = (tpl === 1) ? 0 : clamp(rnd.range(2.0, 2.6), 1.8, W * 0.20);
+      const rem     = W - vorW;
+      const dayFrac = (tpl === 0) ? rnd.range(0.44, 0.54) : rnd.range(0.44, 0.58);
+      const dayW    = clamp(rem * dayFrac, 3.8, rem - 3.2);
+      const nightW  = rem - dayW;
 
-      const zdY = clamp(rnd.range(H * 0.28, H * 0.72), DOOR_W + 0.3, H - DOOR_W - 0.3);
-      gapWall(true, splitX, 0, H, zdY - DOOR_W / 2, walls, gaps);
+      const eBase   = entryLow ? 0 : W - vorW;
+      const dayBase = entryLow ? vorW : nightW;
+      const ngtBase = entryLow ? vorW + dayW : 0;
 
-      const kH = clamp(rnd.range(H * 0.36, H * 0.48), 3.4, H - 3.8);
-      const kitB = rnd.chance(0.5);
-      const kitY = kitB ? 0 : H - kH, livY = kitB ? kH : 0, livH = H - kH;
-      rooms.push({ x: dayX, y: kitY, w: dayW, h: kH,  type: 'Kitchen' });
-      rooms.push({ x: dayX, y: livY, w: dayW, h: livH, type: 'Living Room' });
-      gapWall(false, kitB ? kH : H - kH, dayX, dayX + dayW, dayX + dayW * rnd.range(0.35, 0.65) - DOOR_W / 2, walls, gaps);
+      if (vorW > 0) {
+        rooms.push({ x: eBase, y: 0, w: vorW, h: H, type: 'Entrance' });
+        zGap(true, entryLow ? vorW : W - vorW, 0, H, rnd);
+      }
 
-      const bathH = clamp(rnd.range(2.3, 2.9), 2.1, H * 0.32);
+      if (tpl === 1) {
+        rooms.push({ x: dayBase, y: 0, w: dayW, h: H, type: 'Living Room' });
+      } else {
+        const kH = clamp(rnd.range(H * 0.31, H * 0.43), 3.0, H - 3.6);
+        const kitB = rnd.chance(0.5);
+        const kitY = kitB ? 0 : H - kH, livY = kitB ? kH : 0, livH = H - kH;
+        rooms.push({ x: dayBase, y: kitY, w: dayW, h: kH,  type: 'Kitchen' });
+        rooms.push({ x: dayBase, y: livY, w: dayW, h: livH, type: 'Living Room' });
+        zGap(false, kitB ? kH : H - kH, dayBase, dayBase + dayW, rnd);
+      }
+
+      zGap(true, entryLow ? vorW + dayW : nightW, 0, H, rnd);
+
+      const bathH = clamp(rnd.range(2.1, 2.75), 2.0, H * 0.30);
       const batB  = rnd.chance(0.5);
       const bathY = batB ? 0 : H - bathH, bedY = batB ? bathH : 0, bedH = H - bathH;
-      rooms.push({ x: nightX, y: bathY, w: nightW, h: bathH, type: 'Bathroom' });
-      gapWall(false, batB ? bathH : H - bathH, nightX, nightX + nightW, nightX + nightW * rnd.range(0.35, 0.65) - DOOR_W / 2, walls, gaps);
+      rooms.push({ x: ngtBase, y: bathY, w: nightW, h: bathH, type: 'Bathroom' });
+      zGap(false, batB ? bathH : H - bathH, ngtBase, ngtBase + nightW, rnd);
 
-      if (bedH >= 5.8 && nightW >= 3.2) {
-        const b1H = bedH * rnd.range(0.44, 0.56);
-        gapWall(false, bedY + b1H, nightX, nightX + nightW, nightX + nightW * rnd.range(0.35, 0.65) - DOOR_W / 2, walls, gaps);
-        rooms.push({ x: nightX, y: bedY,        w: nightW, h: b1H,        type: 'Bedroom 1' });
-        rooms.push({ x: nightX, y: bedY + b1H,  w: nightW, h: bedH - b1H, type: 'Bedroom 2' });
+      if (bedH >= 5.5 && nightW >= 3.0) {
+        const b1H = bedH * rnd.range(0.46, 0.58);
+        zGap(false, bedY + b1H, ngtBase, ngtBase + nightW, rnd);
+        rooms.push({ x: ngtBase, y: bedY,       w: nightW, h: b1H,       type: 'Bedroom 1' });
+        rooms.push({ x: ngtBase, y: bedY + b1H, w: nightW, h: bedH - b1H, type: 'Bedroom 2' });
       } else {
-        rooms.push({ x: nightX, y: bedY, w: nightW, h: bedH, type: 'Bedroom 1' });
+        rooms.push({ x: ngtBase, y: bedY, w: nightW, h: bedH, type: 'Bedroom 1' });
       }
     }
 
-    const style = opts.style || 'vienna';
     for (const r of rooms) { r.area = r.w * r.h; r.color = floorColor(r.type, style); furnish(r, rnd, furniture, gaps, style); }
 
-    // Spawn in the centre of the Living Room — guaranteed open, away from all walls
     const lr = rooms.find(r => r.type === 'Living Room');
     const spawn = lr ? { x: lr.x + lr.w / 2, y: lr.y + lr.h / 2 } : innerSpawn(entry, W, H, walls);
     const portals = [{ kind: 'exit', x: entry.x, y: entry.y, label: opts.exitLabel || 'EXIT' }];
