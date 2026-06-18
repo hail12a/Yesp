@@ -67,7 +67,7 @@ function get(url, headers = {}) {
    Uses the GitHub blob API (base64) so it works for PRIVATE repos
    too — no reliance on raw.githubusercontent.com. ---- */
 async function updateFromBranch(branch) {
-  const SKIP = [".git"]; // never overwrite git internals
+  const SKIP = [".git", "accounts.json", "worldstate.json"]; // never overwrite git internals or live runtime data
   const meta = JSON.parse(await get(`https://api.github.com/repos/${REPO}/branches/${branch}`, AUTH));
   const treeSha = meta.commit.commit.tree.sha;
   const tree = JSON.parse(await get(`https://api.github.com/repos/${REPO}/git/trees/${treeSha}?recursive=1`, AUTH));
@@ -140,6 +140,30 @@ function userFromToken(t) {
 
 const world = {}; // key -> { user, lat, lng, heading, speed, mode, car, carLat, carLng, ts }
 const WORLD_TTL = 15000;
+
+/* ---- persistent world changes (trees cut, wildlife, …) ----
+   Stored on disk so forest harvesting + wildlife edits survive restarts and
+   are shared by every player. Structure is intentionally extensible. */
+const WORLD_FILE = path.join(__dirname, "worldstate.json");
+let worldState = { trees: {}, wildlife: {} };
+try {
+  const loaded = JSON.parse(fs.readFileSync(WORLD_FILE, "utf8"));
+  if (loaded && typeof loaded === "object") {
+    worldState.trees = loaded.trees || {};
+    worldState.wildlife = loaded.wildlife || {};
+  }
+} catch (_) {}
+let worldSaveTimer = null;
+function saveWorldState() {
+  // debounce disk writes — harvesting can fire several POSTs per second
+  if (worldSaveTimer) return;
+  worldSaveTimer = setTimeout(() => {
+    worldSaveTimer = null;
+    try { fs.writeFileSync(WORLD_FILE, JSON.stringify(worldState)); }
+    catch (e) { console.log("[worldstate] save failed:", e.message); }
+  }, 800);
+}
+
 const numOr = (v, d = 0) => (typeof v === "number" && isFinite(v) ? v : d);
 const strOr = (v, n = 24) => (typeof v === "string" ? v.slice(0, n) : "");
 
@@ -243,6 +267,29 @@ async function handleApi(req, res, urlPath, query) {
       players.push({ user: world[k].user, lat: world[k].lat, lng: world[k].lng });
     }
     return sendJSON(res, players);
+  }
+
+  /* ---- persistent world changes (trees + wildlife) ---- */
+  if (urlPath === "/api/world/state" && req.method === "GET") {
+    // full snapshot of every persistent change (loaded once on join)
+    return sendJSON(res, { ok: true, trees: worldState.trees, wildlife: worldState.wildlife });
+  }
+  if (urlPath === "/api/world/tree_cut" && req.method === "POST") {
+    const m = await readBody(req);
+    const key = userFromToken(m.token);
+    if (!key) return sendJSON(res, { error: "Not logged in" }, 401);
+    const id = strOr(m.id, 40);
+    if (!id) return sendJSON(res, { error: "missing id" }, 400);
+    const rec = accounts.users[key];
+    if (!worldState.trees[id]) {
+      worldState.trees[id] = {
+        by: rec ? rec.user : key,
+        lat: numOr(m.lat), lng: numOr(m.lng),
+        at: Date.now(),
+      };
+      saveWorldState();
+    }
+    return sendJSON(res, { ok: true, id, trees: worldState.trees[id] });
   }
 
   return sendJSON(res, { error: "unknown endpoint" }, 404);
