@@ -884,39 +884,49 @@
 
     const d = 0.018, cl = Math.cos((center.lat * Math.PI) / 180);
     const s = center.lat - d, n = center.lat + d, w = center.lng - d / cl, e = center.lng + d / cl;
+    const bbox = `${s},${w},${n},${e}`;
 
-    const post = (q) => fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) })
-      .then((r) => r.json()).then((j) => j.elements || []).catch(() => []);
+    // Single light query: nwr = node/way/relation; regex catches forest/wood landuse.
+    // is_in() also pulls any huge polygon the player stands inside.
+    const q = `[out:json][timeout:30];` +
+      `(nwr["natural"="wood"](${bbox});` +
+      `nwr["landuse"~"forest|wood"](${bbox});` +
+      `nwr["natural"="scrub"](${bbox});` +
+      `);out geom;`;
 
-    // Query 1: bbox — catches all polygons with at least one node in ~2km radius
-    const qBbox = `[out:json][timeout:35];(` +
-      `way["natural"="wood"](${s},${w},${n},${e});way["landuse"="forest"](${s},${w},${n},${e});` +
-      `way["landuse"="wood"](${s},${w},${n},${e});way["natural"="scrub"](${s},${w},${n},${e});` +
-      `relation["natural"="wood"](${s},${w},${n},${e});relation["landuse"="forest"](${s},${w},${n},${e});` +
-      `relation["landuse"="wood"](${s},${w},${n},${e}););out geom;`;
+    // Try multiple Overpass mirrors — the main one rate-limits aggressively
+    const endpoints = [
+      'https://overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter',
+      'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+    ];
 
-    // Query 2: is_in — catches huge forest polygons whose nodes are ALL outside the bbox
-    // (the player is inside them but no node falls in our 2km window)
-    const qIsIn = `[out:json][timeout:20];` +
-      `is_in(${center.lat},${center.lng})->.a;` +
-      `(way(pivot.a)["natural"="wood"];way(pivot.a)["landuse"="forest"];` +
-      `way(pivot.a)["landuse"="wood"];way(pivot.a)["natural"="scrub"];` +
-      `relation(pivot.a)["natural"="wood"];relation(pivot.a)["landuse"="forest"];` +
-      `relation(pivot.a)["landuse"="wood"];);out geom;`;
-
-    // Run both independently — one failing won't kill the other
-    const [els1, els2] = await Promise.all([post(qBbox), post(qIsIn)]);
+    let els = [];
+    let diag = 'no response';
+    for (const url of endpoints) {
+      try {
+        const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q) });
+        if (!r.ok) { diag = 'HTTP ' + r.status; continue; }
+        const j = await r.json();
+        els = j.elements || [];
+        diag = els.length + ' elements';
+        break;
+      } catch (err) { diag = 'fetch error'; }
+    }
 
     const seenId = new Set();
-    const polys = [
-      ...parseForestElements(els1, seenId),
-      ...parseForestElements(els2, seenId),
-    ];
+    const polys = parseForestElements(els, seenId);
 
     G.forests = polys; G.forestCenter = { ...center }; G.forestLast = Date.now();
     generateTrees(center);
     drawTrees();
     G.forestFetching = false;
+
+    // on-screen diagnostic (only when nothing was drawn, so it's not noisy)
+    if (G.trees.length === 0 && $('#mg-hint')) {
+      $('#mg-hint').textContent = `🌲 No trees here — forest fetch: ${diag}, ${polys.length} areas.`;
+    }
+    if (window.console) console.log('[forests]', { diag, areas: polys.length, trees: G.trees.length, center });
   }
 
   // Deterministic scatter: same forest polygon always yields the same trees
