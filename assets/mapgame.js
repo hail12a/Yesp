@@ -319,6 +319,7 @@
   function startRespawn() {
     if (!G.playing || G.respawning) return;
     if (G.inside) exitBuilding();
+    if (G.cutting) cancelCut();  // clear axe state before entering respawn
     G.respawning = true;
     G.respawnTarget = null;
     G.route = null; clearRoute(); G.speed = 0; G.walkTarget = null;
@@ -505,7 +506,9 @@
   }
 
   function stepCut(dt) {
-    const c = G.cutting; if (!c) return;
+    const c = G.cutting; if (!c || c.done) return;
+    // If the tree was cut by another player while we were swinging, cancel cleanly
+    if (G.treeCuts.has(c.tree.id)) { cancelCut(); return; }
     c.t += dt;
     // Fast swing: accelerate into tree, slow back out
     const SWING_DUR = 0.7; // seconds per swing
@@ -795,26 +798,28 @@
     const q = `[out:json][timeout:25];(way["building"](${s},${w},${n},${e});relation["building"](${s},${w},${n},${e}););out geom;`;
     try {
       const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) });
-      const data = await r.json();
-      const polys = [];
-      for (const el of data.elements || []) {
-        let rings = [];
-        if (el.type === 'way' && el.geometry) rings = [el.geometry];
-        else if (el.type === 'relation' && el.members) rings = el.members.filter((m) => m.geometry && m.role !== 'inner').map((m) => m.geometry);
-        const tags = el.tags || {}; // OSM identity: building=, building:levels, shop, amenity, name…
-        for (const g of rings) {
-          if (!g || g.length < 3) continue;
-          let minLat = 1e9, maxLat = -1e9, minLng = 1e9, maxLng = -1e9;
-          const pts = g.map((p) => {
-            if (p.lat < minLat) minLat = p.lat; if (p.lat > maxLat) maxLat = p.lat;
-            if (p.lon < minLng) minLng = p.lon; if (p.lon > maxLng) maxLng = p.lon;
-            return { lat: p.lat, lng: p.lon };
-          });
-          polys.push({ minLat, maxLat, minLng, maxLng, pts, tags });
+      const data = r.ok ? await r.json() : null;
+      if (data) {
+        const polys = [];
+        for (const el of data.elements || []) {
+          let rings = [];
+          if (el.type === 'way' && el.geometry) rings = [el.geometry];
+          else if (el.type === 'relation' && el.members) rings = el.members.filter((m) => m.geometry && m.role !== 'inner').map((m) => m.geometry);
+          const tags = el.tags || {};
+          for (const g of rings) {
+            if (!g || g.length < 3) continue;
+            let minLat = 1e9, maxLat = -1e9, minLng = 1e9, maxLng = -1e9;
+            const pts = g.map((p) => {
+              if (p.lat < minLat) minLat = p.lat; if (p.lat > maxLat) maxLat = p.lat;
+              if (p.lon < minLng) minLng = p.lon; if (p.lon > maxLng) maxLng = p.lon;
+              return { lat: p.lat, lng: p.lon };
+            });
+            polys.push({ minLat, maxLat, minLng, maxLng, pts, tags });
+          }
         }
+        G.buildings = polys; G.bldgCenter = { ...center }; G.bldgLast = Date.now();
+        drawBuildings();
       }
-      G.buildings = polys; G.bldgCenter = { ...center }; G.bldgLast = Date.now();
-      drawBuildings();
     } catch (e) {}
     G.bldgFetching = false;
   }
@@ -903,30 +908,32 @@
 
     let els = [];
     let diag = 'no response';
-    for (const url of endpoints) {
-      try {
-        const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q) });
-        if (!r.ok) { diag = 'HTTP ' + r.status; continue; }
-        const j = await r.json();
-        els = j.elements || [];
-        diag = els.length + ' elements';
-        break;
-      } catch (err) { diag = 'fetch error'; }
+    try {
+      for (const url of endpoints) {
+        try {
+          const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q) });
+          if (!r.ok) { diag = 'HTTP ' + r.status; continue; }
+          const j = await r.json();
+          els = j.elements || [];
+          diag = els.length + ' elements from ' + url.replace('https://', '').split('/')[0];
+          break;
+        } catch (err) { diag = 'fetch error'; }
+      }
+
+      const seenId = new Set();
+      const polys = parseForestElements(els, seenId);
+
+      G.forests = polys; G.forestCenter = { ...center }; G.forestLast = Date.now();
+      generateTrees(center);
+      drawTrees();
+
+      if (G.trees.length === 0 && $('#mg-hint')) {
+        $('#mg-hint').textContent = `🌲 No trees — ${diag}, ${polys.length} forest areas found.`;
+      }
+      if (window.console) console.log('[forests]', { diag, areas: polys.length, trees: G.trees.length });
+    } finally {
+      G.forestFetching = false;
     }
-
-    const seenId = new Set();
-    const polys = parseForestElements(els, seenId);
-
-    G.forests = polys; G.forestCenter = { ...center }; G.forestLast = Date.now();
-    generateTrees(center);
-    drawTrees();
-    G.forestFetching = false;
-
-    // on-screen diagnostic (only when nothing was drawn, so it's not noisy)
-    if (G.trees.length === 0 && $('#mg-hint')) {
-      $('#mg-hint').textContent = `🌲 No trees here — forest fetch: ${diag}, ${polys.length} areas.`;
-    }
-    if (window.console) console.log('[forests]', { diag, areas: polys.length, trees: G.trees.length, center });
   }
 
   // Deterministic scatter: same forest polygon always yields the same trees
@@ -1067,6 +1074,7 @@
       let rm = G.remotes[p.user];
       if (!rm) {
         rm = makeRemote(p.user);
+        if (!rm) continue;
         G.remotes[p.user] = rm;
       }
       rm.tgtCar = { lat: p.carLat, lng: p.carLng };
@@ -1079,7 +1087,7 @@
   }
 
   function makeRemote(user) {
-    const layer = $('#mg-remotes');
+    const layer = $('#mg-remotes'); if (!layer) return null;
     const carEl = document.createElement('div');
     carEl.className = 'mg-r';
     carEl.innerHTML = `<div class="mg-r-rot"></div><div class="mg-r-label"></div>`;
@@ -1196,14 +1204,17 @@
       label.textContent = G.user;
       // draw my parked car on the map
       if (!G.parkedEl) {
-        G.parkedEl = document.createElement('div');
-        G.parkedEl.className = 'mg-r';
-        G.parkedEl.innerHTML = `<div class="mg-r-rot"></div><div class="mg-r-label"></div>`;
-        $('#mg-remotes').appendChild(G.parkedEl);
-        G.parkedEl.querySelector('.mg-r-rot').innerHTML = carSVG(CARS[G.carModel].color);
-        G.parkedEl.querySelector('.mg-r-label').textContent = CARS[G.carModel].name;
+        const layer = $('#mg-remotes');
+        if (layer) {
+          G.parkedEl = document.createElement('div');
+          G.parkedEl.className = 'mg-r';
+          G.parkedEl.innerHTML = `<div class="mg-r-rot"></div><div class="mg-r-label"></div>`;
+          layer.appendChild(G.parkedEl);
+          G.parkedEl.querySelector('.mg-r-rot').innerHTML = carSVG(CARS[G.carModel].color);
+          G.parkedEl.querySelector('.mg-r-label').textContent = CARS[G.carModel].name;
+        }
       }
-      place(G.parkedEl, G.carPos);
+      if (G.parkedEl) place(G.parkedEl, G.carPos);
     }
   }
 
@@ -1216,7 +1227,7 @@
     const k = 1 - Math.exp(-dt * 10);
     for (const u in G.remotes) {
       const rm = G.remotes[u];
-      if (!rm.curCar || !rm.tgtCar) continue;
+      if (!rm.curCar || !rm.tgtCar || !rm.curPos || !rm.tgtPos) continue;
       rm.curCar.lat += (rm.tgtCar.lat - rm.curCar.lat) * k;
       rm.curCar.lng += (rm.tgtCar.lng - rm.curCar.lng) * k;
       rm.curPos.lat += (rm.tgtPos.lat - rm.curPos.lat) * k;
