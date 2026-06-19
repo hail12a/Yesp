@@ -314,11 +314,19 @@ function startServer() {
         // SPA fallback → index.html
         return fs.readFile(path.join(__dirname, "index.html"), (e2, d2) => {
           if (e2) { res.writeHead(404); return res.end("Not found"); }
-          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          // The server self-updates from GitHub; never let the browser run a
+          // stale cached copy of the app shell or its assets.
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache, must-revalidate" });
           res.end(d2);
         });
       }
-      res.writeHead(200, { "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream" });
+      res.writeHead(200, {
+        "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream",
+        // no-cache forces a revalidation each load, so freshly pulled JS/CSS
+        // (e.g. assets/mapgame.js) always reaches the client instead of a
+        // heuristically-cached older version
+        "Cache-Control": "no-cache, must-revalidate",
+      });
       res.end(data);
     });
   }).listen(PORT, () => console.log(`Yesp Docs running on port ${PORT}`));
