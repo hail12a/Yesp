@@ -168,6 +168,21 @@ const ROAD_W = {
   unclassified:5.5, service:3.5, track:3,
   pedestrian:4, footway:2, path:1.5, cycleway:2,
 };
+// Render priority — higher classes are lifted a hair at junctions so a motorway
+// sits on top of the slip road instead of z-fighting it.
+const ROAD_PRI = {
+  motorway:9, motorway_link:8, trunk:8, trunk_link:7,
+  primary:7, primary_link:6, secondary:6, secondary_link:5,
+  tertiary:5, tertiary_link:4, unclassified:4, road:4, residential:4,
+  living_street:3, service:2, track:1,
+  pedestrian:2, footway:1, path:1, cycleway:1, steps:1, bridleway:1, corridor:1,
+};
+// Footpaths render thin, flush and a lighter colour so they read as pavement,
+// not as part of the carriageway tangle.
+const PATH_KINDS = new Set(["footway", "path", "cycleway", "pedestrian", "steps", "bridleway", "corridor"]);
+// Only these highway classes get drawn; anything else (construction, proposed,
+// raceway, platform…) is skipped so it doesn't add spaghetti.
+const ROAD_RENDER = new Set(Object.keys(ROAD_W).concat(["road", "steps", "bridleway", "corridor"]));
 
 /* ---- oriented bounding box (min-area rectangle) for a footprint ----
    Extruding the axis-aligned bbox turns rotated/L-shaped buildings into
@@ -272,17 +287,29 @@ async function fetchOSM(clat, clng, halfM, proj) {
       continue;
     }
     if (t.highway && el.geometry && el.geometry.length >= 2) {
-      // prefer explicit OSM width tag (metres), then lanes×3.5, then class default
+      const hw = t.highway;
+      if (!ROAD_RENDER.has(hw)) continue;            // not a drawable class
+      if (t.tunnel && t.tunnel !== "no") continue;   // underground — keep it off the surface
+      if (t.area === "yes") continue;                // a plaza polygon, not a centreline
+      // width: explicit OSM width (m) → lanes×3.5 → real-world class default
       let w;
       const tw = parseFloat(t.width);
       if (isFinite(tw) && tw > 0) {
         w = tw;
       } else {
-        const lanes = parseInt(t.lanes);
-        w = (isFinite(lanes) && lanes > 0) ? lanes * 3.5 : (ROAD_W[t.highway] || 3);
+        const lanes = parseInt(t.lanes, 10);
+        w = (isFinite(lanes) && lanes > 0) ? lanes * 3.5 : (ROAD_W[hw] || 3);
       }
+      w = Math.max(1.5, Math.min(60, w));
       const pts = simplify(el.geometry.map(p => proj(p.lat, p.lon)), 0.5);
-      if (pts.length >= 2) roads.push({ cls: t.highway, w: +w.toFixed(1), pts });
+      if (pts.length >= 2) roads.push({
+        cls: hw,
+        w: +w.toFixed(1),
+        kind: PATH_KINDS.has(hw) ? "path" : "road",
+        pri: ROAD_PRI[hw] || 1,
+        bridge: (t.bridge && t.bridge !== "no") ? 1 : 0,
+        pts,
+      });
       continue;
     }
     if (t.natural === "water" || t.water || t.waterway === "riverbank" || t.natural === "coastline") {
@@ -304,7 +331,7 @@ async function fetchOSM(clat, clng, halfM, proj) {
    Main entry: build (or load) a tile
    ========================================================= */
 function tileKey(lat, lng, size) {
-  return crypto.createHash("sha1").update(`v4_${lat.toFixed(5)}_${lng.toFixed(5)}_${size}`).digest("hex").slice(0, 16);
+  return crypto.createHash("sha1").update(`v5_${lat.toFixed(5)}_${lng.toFixed(5)}_${size}`).digest("hex").slice(0, 16);
 }
 async function buildTile(lat, lng, size) {
   size = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(size) || 3000));
@@ -350,8 +377,8 @@ function robloxScript(host, lat, lng, size) {
   saved — no runtime script, nothing to break on Play:
     • Terrain heightmap (SRTM1, bilinear-interpolated)
     • Water bodies (polygon raster fill)
-    • Roads (asphalt parts)
-    • Buildings (extruded footprint boxes)
+    • Roads & footpaths (graded, terrain-sunk ribbons)
+    • Buildings (oriented footprint boxes)
   Scale: 1 stud = 1 metre.
   Requires: Game Settings → Security → Allow HTTP Requests = ON.
   The build runs on a background thread so Studio stays responsive.
@@ -476,29 +503,74 @@ for _, poly in ipairs(tile.water) do
   task.wait()
 end
 
------ 3. roads (raised flat ribbons that follow the terrain) -
+----- 3. roads & paths (smoothed, grade-following ribbons sunk into ground) -
 print("[Yesp] placing roads…")
 local roadFolder = Instance.new("Folder")
 roadFolder.Name = "Roads"; roadFolder.Parent = Workspace
+local ROAD_COL = Color3.fromRGB(52,54,58)
+local PATH_COL = Color3.fromRGB(150,142,128)
+
+-- draw minor classes first, majors last, with a tiny per-class height bias so
+-- the many ribbons overlapping at a junction never z-fight into a flicker mess
+table.sort(tile.roads, function(a, b) return (a.pri or 1) < (b.pri or 1) end)
+
 local rSeg = 0
 for _, road in ipairs(tile.roads) do
-  for i = 1, #road.pts - 1 do
-    local a, b = road.pts[i], road.pts[i+1]
-    local ax,az,bx,bz = a.x,a.z,b.x,b.z
-    local len = math.sqrt((bx-ax)^2+(bz-az)^2)
-    if len > 0.5 then
-      local mx, mz = (ax+bx)/2, (az+bz)/2
-      -- average the two endpoint ground heights and sit clearly on top
-      local gy = (worldY(ax,az) + worldY(bx,bz)) / 2 + 0.9
-      local p = Instance.new("Part")
-      p.Anchored=true; p.CanCollide=false; p.CastShadow=false
-      p.TopSurface=Enum.SurfaceType.Smooth; p.BottomSurface=Enum.SurfaceType.Smooth
-      p.Size=Vector3.new(road.w, 1.0, len + road.w*0.5) -- overlap joints so corners connect
-      p.Color=Color3.fromRGB(48,48,52); p.Material=Enum.Material.Asphalt
-      p.CFrame=CFrame.new(Vector3.new(mx,gy,mz), Vector3.new(bx,gy,bz))
-      p.Parent=roadFolder
-      rSeg += 1
-      if rSeg % 250 == 0 then task.wait() end
+  local pts = road.pts
+  local n = #pts
+  if n >= 2 then
+    -- sample ground height at every vertex
+    local ys = {}
+    for i = 1, n do ys[i] = worldY(pts[i].x, pts[i].z) end
+    if road.bridge == 1 then
+      -- hold a flat deck at the highest point so bridges don't dive to the water
+      local mx = -math.huge
+      for i = 1, n do if ys[i] > mx then mx = ys[i] end end
+      for i = 1, n do ys[i] = mx end
+    else
+      -- moving-average the heights so the road grades smoothly instead of
+      -- stair-stepping over every little terrain wobble
+      local sm = {}
+      for i = 1, n do
+        local a = ys[math.max(1, i-1)]
+        local b = ys[i]
+        local c = ys[math.min(n, i+1)]
+        sm[i] = (a + 2*b + c) / 4
+      end
+      ys = sm
+    end
+
+    local isPath  = (road.kind == "path")
+    local col     = isPath and PATH_COL or ROAD_COL
+    local mat     = isPath and Enum.Material.Concrete or Enum.Material.Asphalt
+    local thick   = isPath and 1.2 or 3.5       -- roads thick so the body buries terrain bumps
+    local rise    = isPath and 0.35 or 0.6      -- visible top sits just above the grass
+    local bias    = (road.pri or 1) * 0.04      -- per-class anti-z-fight lift
+    local overlap = isPath and (road.w * 0.3) or road.w  -- extend ends so corners fill in
+
+    for i = 1, n - 1 do
+      local a, b = pts[i], pts[i+1]
+      local hlen = math.sqrt((b.x-a.x)^2 + (b.z-a.z)^2)
+      if hlen > 0.05 then
+        local pa = Vector3.new(a.x, ys[i]   + rise + bias, a.z)
+        local pb = Vector3.new(b.x, ys[i+1] + rise + bias, b.z)
+        local mid = (pa + pb) * 0.5
+        local len = (pb - pa).Magnitude
+        -- orient along the segment (tilts to follow the grade on slopes)…
+        local rotOnly = CFrame.lookAt(mid, pb)
+        rotOnly = rotOnly - rotOnly.Position
+        local p = Instance.new("Part")
+        p.Anchored=true; p.CanCollide=false; p.CastShadow=false
+        p.TopSurface=Enum.SurfaceType.Smooth; p.BottomSurface=Enum.SurfaceType.Smooth
+        p.Size=Vector3.new(road.w, thick, len + overlap)
+        p.Color=col; p.Material=mat
+        -- …then drop the centre by half the thickness so the top face is at
+        -- grade+rise and the solid body sinks into the terrain (no grass poke)
+        p.CFrame=CFrame.new(mid.X, mid.Y - thick*0.5, mid.Z) * rotOnly
+        p.Parent=roadFolder
+        rSeg += 1
+        if rSeg % 300 == 0 then task.wait() end
+      end
     end
   end
 end
