@@ -8,6 +8,8 @@ const https = require("https");
 const fs    = require("fs");
 const path  = require("path");
 const crypto = require("crypto");
+let worldgen = null;
+try { worldgen = require("./worldgen"); } catch (e) { console.log("[worldgen] not loaded:", e.message); }
 
 const PORT   = process.env.SERVER_PORT || process.env.PORT || 8080;
 const REPO   = process.env.REPO   || "hail12a/Yesp";
@@ -67,7 +69,7 @@ function get(url, headers = {}) {
    Uses the GitHub blob API (base64) so it works for PRIVATE repos
    too — no reliance on raw.githubusercontent.com. ---- */
 async function updateFromBranch(branch) {
-  const SKIP = [".git", "accounts.json", "worldstate.json"]; // never overwrite git internals or live runtime data
+  const SKIP = [".git", "accounts.json", "worldstate.json", "tilecache"]; // never overwrite git internals or live runtime data
   const meta = JSON.parse(await get(`https://api.github.com/repos/${REPO}/branches/${branch}`, AUTH));
   const treeSha = meta.commit.commit.tree.sha;
   const tree = JSON.parse(await get(`https://api.github.com/repos/${REPO}/git/trees/${treeSha}?recursive=1`, AUTH));
@@ -290,6 +292,38 @@ async function handleApi(req, res, urlPath, query) {
       saveWorldState();
     }
     return sendJSON(res, { ok: true, id, trees: worldState.trees[id] });
+  }
+
+  /* ---- real-world → Roblox tile generation ---- */
+  if (urlPath === "/api/world/tile" && req.method === "GET") {
+    if (!worldgen) return sendJSON(res, { error: "worldgen unavailable" }, 503);
+    const lat = parseFloat(query.get("lat")), lng = parseFloat(query.get("lng"));
+    const size = parseInt(query.get("size") || "3000", 10);
+    if (!isFinite(lat) || !isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180)
+      return sendJSON(res, { error: "lat/lng required (valid coordinates)" }, 400);
+    try {
+      const tile = await worldgen.buildTile(lat, lng, size);
+      return sendJSON(res, tile);
+    } catch (e) {
+      return sendJSON(res, { error: "tile build failed: " + e.message }, 500);
+    }
+  }
+  if (urlPath === "/api/world/roblox.lua" && req.method === "GET") {
+    if (!worldgen) { res.writeHead(503); return res.end("worldgen unavailable"); }
+    const lat = parseFloat(query.get("lat")), lng = parseFloat(query.get("lng"));
+    let size = parseInt(query.get("size") || "3000", 10);
+    if (!isFinite(lat) || !isFinite(lng)) { res.writeHead(400); return res.end("-- lat/lng query params required"); }
+    size = Math.max(worldgen.MIN_SIZE, Math.min(worldgen.MAX_SIZE, size || 3000));
+    // derive the public origin so the baked-in endpoint URL is reachable
+    const proto = req.headers["x-forwarded-proto"] || "http";
+    const host = query.get("host") || (proto + "://" + (req.headers["x-forwarded-host"] || req.headers.host || "localhost:" + PORT));
+    const lua = worldgen.robloxScript(host, lat, lng, size);
+    res.writeHead(200, {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "no-store",
+    });
+    return res.end(lua);
   }
 
   return sendJSON(res, { error: "unknown endpoint" }, 404);

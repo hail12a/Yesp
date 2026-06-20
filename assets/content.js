@@ -463,7 +463,70 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
 
     <div class="callout warn"><span class="ico">⚠️</span><p>The Command Bar caps very long input. If the script is large, the <strong>Download .lua</strong> button gives you a file — drop it into <code class="inline-code">ServerScriptService</code> as a <code class="inline-code">Script</code>, run once, then delete it.</p></div>
 
-    ${pager({ href: '/avatars', title: 'Avatar Vault' }, { href: '/quantum', title: 'Quantum Lab' })}
+    ${pager({ href: '/avatars', title: 'Avatar Vault' }, { href: '/roblox-world', title: 'Roblox World Server' })}
+  `
+},
+
+/* ----------------------- ROBLOX WORLD SERVER ----------------------- */
+'/roblox-world': {
+  section: 'world', title: 'Roblox World Server',
+  html: () => `
+    <span class="eyebrow">SERVER-RENDERED · TERRAIN · WATER · ROADS · BUILDINGS</span>
+    <h1>Roblox World Server</h1>
+    <p class="lead">A heavier sibling of the World Builder. Your <strong>server</strong> does all the data gathering — elevation (SRTM), water, roads <em>and</em> building footprints from OpenStreetMap — and digests it into tiny JSON. Roblox fetches that JSON at runtime with <code class="inline-code">HttpService</code> and builds the world: terrain heights, water fill, road parts, and <strong>extruded boxy buildings</strong>. One tile at a time, default <strong>3 × 3 km</strong>.</p>
+
+    <div class="callout info"><span class="ico">🧠</span><p>The split: HttpService can only move text, so the box pre-digests everything to numbers and sends it once per tile (cached on disk for instant re-fetch). Roblox just spawns cheap parts and paints terrain. Great in cities, patchy where OSM is sparse — it's procedural and blocky, but it's a real place.</p></div>
+
+    <h2 id="pick">1 · Pick a location &amp; size</h2>
+    <div class="wb-cities" id="rw-cities">
+      <button data-lat="48.2082" data-lon="16.3738">🇦🇹 Vienna</button>
+      <button data-lat="47.0707" data-lon="15.4395">🇦🇹 Graz</button>
+      <button data-lat="40.7128" data-lon="-74.0060">🗽 Manhattan</button>
+      <button data-lat="51.5074" data-lon="-0.1278">🇬🇧 London</button>
+      <button data-lat="35.6586" data-lon="139.7454">🗼 Tokyo</button>
+      <button data-lat="37.8199" data-lon="-122.4783">🌉 Golden Gate</button>
+    </div>
+
+    <div class="wb-grid">
+      <label class="wb-field"><span>Latitude</span><input id="rw-lat" type="number" step="0.0001" value="48.2082" /></label>
+      <label class="wb-field"><span>Longitude</span><input id="rw-lon" type="number" step="0.0001" value="16.3738" /></label>
+      <label class="wb-field"><span>Tile size</span>
+        <select id="rw-size">
+          <option value="1000">1 × 1 km</option>
+          <option value="2000">2 × 2 km</option>
+          <option value="3000" selected>3 × 3 km (default)</option>
+          <option value="4000">4 × 4 km</option>
+          <option value="6000">6 × 6 km (max)</option>
+          <option value="custom">Custom…</option>
+        </select>
+      </label>
+      <label class="wb-field" id="rw-custom-wrap" hidden><span>Custom size (m)</span><input id="rw-custom" type="number" min="250" max="6000" step="50" value="3000" /></label>
+    </div>
+
+    <div class="wb-out-actions">
+      <button class="wb-gen" id="rw-gen">🧱  Generate Roblox script</button>
+      <button class="wb-copy" id="rw-preview">🔎 Preview tile data</button>
+    </div>
+    <div class="wb-status" id="rw-status">Idle — pick a place and generate. First build of a new tile takes a few seconds (then it's cached).</div>
+
+    <h2 id="result">2 · Your script</h2>
+    <div class="wb-stats" id="rw-stats">No script yet.</div>
+    <div class="wb-out-actions">
+      <button class="wb-copy" id="rw-copy" disabled>Copy script</button>
+      <a class="wb-dl" id="rw-dl" aria-disabled="true">Download .lua</a>
+    </div>
+    <div class="code wb-codebox"><div class="code-head"><span class="code-lang">lua · paste into ServerScriptService</span></div><pre><code id="rw-out">-- generate a script above. It fetches your server's /api/world/tile endpoint at runtime, so it stays tiny no matter how big the area is.</code></pre></div>
+
+    <h2 id="how">3 · Run it in Studio</h2>
+    <ol class="wb-steps">
+      <li>Open <strong>Roblox Studio</strong> on a new baseplate.</li>
+      <li>Turn on HTTP: <strong>Game Settings → Security → Allow HTTP Requests</strong>.</li>
+      <li>Insert a <code class="inline-code">Script</code> in <code class="inline-code">ServerScriptService</code>, paste, and Play. It fetches the tile JSON and builds terrain, water, roads, and buildings.</li>
+    </ol>
+
+    <div class="callout warn"><span class="ico">⚠️</span><p>The script calls <code class="inline-code">${location.origin}/api/world/tile</code> — that URL must be reachable from Roblox's servers (a public host, not <code class="inline-code">localhost</code>). HttpService is rate-limited (~500/min), so this loads <strong>one tile per run</strong>.</p></div>
+
+    ${pager({ href: '/world-builder', title: 'Real-World Terrain' }, { href: '/map-drive', title: 'Map Drive' })}
   `
 },
 
