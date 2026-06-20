@@ -159,12 +159,14 @@ function simplify(pts, tol) {
   out.push(pts[pts.length - 1]);
   return out;
 }
+// Real-world carriageway widths in metres — used only when OSM lacks width/lanes tags.
+// OSM highway=motorway/trunk is usually drawn per-direction (one carriageway).
 const ROAD_W = {
-  motorway:22, motorway_link:12, trunk:18, trunk_link:11,
-  primary:15, primary_link:10, secondary:12, secondary_link:9,
-  tertiary:10, tertiary_link:8, residential:7, living_street:6,
-  unclassified:7, service:5, track:4,
-  pedestrian:4, footway:3, path:3, cycleway:3,
+  motorway:11, motorway_link:5, trunk:9, trunk_link:5,
+  primary:7, primary_link:4, secondary:7, secondary_link:4,
+  tertiary:6, tertiary_link:4, residential:5.5, living_street:4,
+  unclassified:5.5, service:3.5, track:3,
+  pedestrian:4, footway:2, path:1.5, cycleway:2,
 };
 
 /* ---- oriented bounding box (min-area rectangle) for a footprint ----
@@ -270,7 +272,15 @@ async function fetchOSM(clat, clng, halfM, proj) {
       continue;
     }
     if (t.highway && el.geometry && el.geometry.length >= 2) {
-      const w = ROAD_W[t.highway] || 2.5;
+      // prefer explicit OSM width tag (metres), then lanes×3.5, then class default
+      let w;
+      const tw = parseFloat(t.width);
+      if (isFinite(tw) && tw > 0) {
+        w = tw;
+      } else {
+        const lanes = parseInt(t.lanes);
+        w = (isFinite(lanes) && lanes > 0) ? lanes * 3.5 : (ROAD_W[t.highway] || 3);
+      }
       const pts = simplify(el.geometry.map(p => proj(p.lat, p.lon)), 0.5);
       if (pts.length >= 2) roads.push({ cls: t.highway, w: +w.toFixed(1), pts });
       continue;
@@ -294,7 +304,7 @@ async function fetchOSM(clat, clng, halfM, proj) {
    Main entry: build (or load) a tile
    ========================================================= */
 function tileKey(lat, lng, size) {
-  return crypto.createHash("sha1").update(`v3_${lat.toFixed(5)}_${lng.toFixed(5)}_${size}`).digest("hex").slice(0, 16);
+  return crypto.createHash("sha1").update(`v4_${lat.toFixed(5)}_${lng.toFixed(5)}_${size}`).digest("hex").slice(0, 16);
 }
 async function buildTile(lat, lng, size) {
   size = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(size) || 3000));
@@ -505,13 +515,27 @@ local palette = {
 local batchCount = 0
 for _, b in ipairs(tile.buildings) do
   if b.w >= 1 and b.d >= 1 then
-    local gy = worldY(b.cx, b.cz)
+    -- sample all four corners + centre and take the lowest ground point
+    local hw, hd = b.w/2, b.d/2
+    local cr, sr = math.cos(-b.rot), math.sin(-b.rot)
+    local corners = {
+      {b.cx + cr*hw + sr*hd,  b.cz - sr*hw + cr*hd},
+      {b.cx + cr*hw - sr*hd,  b.cz - sr*hw - cr*hd},
+      {b.cx - cr*hw + sr*hd,  b.cz + sr*hw + cr*hd},
+      {b.cx - cr*hw - sr*hd,  b.cz + sr*hw - cr*hd},
+      {b.cx, b.cz},
+    }
+    local gy = math.huge
+    for _, c in ipairs(corners) do
+      local y = worldY(c[1], c[2])
+      if y < gy then gy = y end
+    end
     local part = Instance.new("Part")
     part.Anchored=true
     part.TopSurface=Enum.SurfaceType.Smooth; part.BottomSurface=Enum.SurfaceType.Smooth
     part.Size=Vector3.new(b.w, b.h, b.d)
-    -- sink the base 1.5 m into the ground so it never floats on slopes
-    part.CFrame=CFrame.new(b.cx, gy + b.h/2 - 1.5, b.cz) * CFrame.Angles(0, -b.rot, 0)
+    -- base flush with (or slightly below) the lowest corner so no floating
+    part.CFrame=CFrame.new(b.cx, gy + b.h/2 - 1.0, b.cz) * CFrame.Angles(0, -b.rot, 0)
     part.Color=palette[(batchCount % #palette) + 1]; part.Material=Enum.Material.Concrete
     part.Parent=bldFolder
   end
