@@ -272,17 +272,20 @@ async function buildTile(lat, lng, size) {
    ========================================================= */
 function robloxScript(host, lat, lng, size) {
   const endpoint = `${host}/api/world/tile?lat=${lat}&lng=${lng}&size=${size}`;
-  return `--!strict
---[[
-  Yesp Real-World Renderer — paste into ServerScriptService
-  Fetches a real-world tile (${size}×${size} m around ${lat}, ${lng})
-  from your Yesp server and builds:
+  return `--[[
+  Yesp Real-World Renderer — PASTE INTO THE STUDIO COMMAND BAR
+  (View → Command Bar), then press Enter.
+
+  Builds a real-world tile (${size}×${size} m around ${lat}, ${lng})
+  directly in edit mode, so the result is BAKED INTO YOUR PLACE and
+  saved — no runtime script, nothing to break on Play:
     • Terrain heightmap (SRTM1, bilinear-interpolated)
     • Water bodies (polygon raster fill)
     • Roads (asphalt parts)
     • Buildings (extruded footprint boxes)
   Scale: 1 stud = 1 metre.
   Requires: Game Settings → Security → Allow HTTP Requests = ON.
+  The build runs on a background thread so Studio stays responsive.
 --]]
 
 local HttpService = game:GetService("HttpService")
@@ -292,6 +295,7 @@ local Terrain     = Workspace.Terrain
 local ENDPOINT = "${endpoint}"
 local BASE_Y   = 0  -- world Y for the tile's minimum elevation (sea level)
 
+task.spawn(function()
 ----- fetch & decode -----------------------------------------
 print("[Yesp] fetching tile…")
 local ok, raw = pcall(function() return HttpService:GetAsync(ENDPOINT, true) end)
@@ -324,65 +328,54 @@ local function worldY(x, z)  -- terrain Y at a local-metre point
   return BASE_Y + bilinH(fx, fz)
 end
 
------ 1. terrain (WriteVoxels heightmap) ---------------------
+----- 1. terrain (WriteVoxels heightmap, smooth occupancy) ---
 print("[Yesp] building terrain…")
-local VRES   = 4        -- Roblox voxel resolution (studs, must be 4)
-local vSide  = math.ceil(tile.size / VRES)
-local vCells = Vector3.new(vSide, 1, vSide)
-local maxElevation = (elev.maxH - minH)
+local VRES  = 4                   -- Roblox voxel resolution (studs)
+local FLOOR = 60                  -- studs of solid ground below the lowest point
+local function snap(v) return math.floor(v / VRES) * VRES end
 
--- We build a single-layer occupancy + material grid and write it in slices
--- so we don't allocate a huge table all at once.
--- Each voxel column gets its own Y layer count based on height.
-local FLOOR = 60  -- studs of solid ground below the lowest point (sea bed)
-local totalY = math.ceil((maxElevation + FLOOR) / VRES) + 2
+-- grid-aligned origin so the region edges land exactly on voxel boundaries
+local ox = snap(-half)
+local oz = snap(-half)
+local oy = snap(BASE_Y - FLOOR)
+local nx = math.ceil((tile.size + (-half - ox)) / VRES) + 1
+local nz = math.ceil((tile.size + (-half - oz)) / VRES) + 1
+local ny = math.ceil(((elev.maxH - minH) + (BASE_Y - oy)) / VRES) + 1
 
--- Build row by row (z-axis) to keep memory manageable
-local regionBase = Vector3.new(-half, BASE_Y - FLOOR, -half)
-for zv = 0, vSide - 1 do
-  local mats  = {{}}
-  local occs  = {{}}
-  local worldZ = -half + (zv + 0.5) * VRES
+local GRASS, AIR = Enum.Material.Grass, Enum.Material.Air
+local BAND = 24                   -- voxels of Z processed per WriteVoxels call
 
-  for xv = 0, vSide - 1 do
-    local worldX = -half + (xv + 0.5) * VRES
-    local hStuds = worldY(worldX, worldZ)
-    local colTop = math.ceil((hStuds + FLOOR) / VRES)
-    -- build a vertical column: fill below surface, air above
-    local col_m, col_o = {}, {}
-    for yv = 1, totalY do
-      if yv <= colTop then
-        col_m[yv] = Enum.Material.Grass.Value
-        col_o[yv] = 1
-      else
-        col_m[yv] = Enum.Material.Air.Value
-        col_o[yv] = 0
-      end
-    end
-    mats[xv+1] = col_m
-    occs[xv+1] = col_o
-  end
-
+for z0 = 0, nz - 1, BAND do
+  local zc = math.min(BAND, nz - z0)
   local region = Region3.new(
-    Vector3.new(-half + zv*VRES, BASE_Y - FLOOR, -half),
-    Vector3.new(-half + (zv+1)*VRES, BASE_Y - FLOOR + totalY*VRES, half)
-  ):ExpandToGrid(VRES)
-  -- WriteVoxels layout: [x][y][z]  (x is row, z is col in our orientation)
-  -- We write a 1-row-wide strip each iteration
-  local strip_m, strip_o = {{}}, {{}}
-  strip_m[1] = mats; strip_o[1] = occs
-  -- reformat: WriteVoxels expects [x][y][z] but our mats is [x][y]
-  -- so wrap in z=1 dimension
-  local wm = {}; local wo = {}
-  for xi = 1, #mats do
-    wm[xi] = {}; wo[xi] = {}
-    for yi = 1, totalY do
-      wm[xi][yi] = { mats[xi][yi] }
-      wo[xi][yi] = { occs[xi][yi] }
+    Vector3.new(ox, oy, oz + z0 * VRES),
+    Vector3.new(ox + nx * VRES, oy + ny * VRES, oz + (z0 + zc) * VRES)
+  )
+  local mat, occ = {}, {}
+  for xi = 1, nx do
+    local mcol, ocol = {}, {}
+    local wx = ox + (xi - 0.5) * VRES
+    for yi = 1, ny do
+      local mrow, orow = {}, {}
+      local voxBottom = oy + (yi - 1) * VRES
+      for zi = 1, zc do
+        local wz = oz + (z0 + zi - 0.5) * VRES
+        local surf = worldY(wx, wz)                 -- terrain top (studs)
+        local frac = (surf - voxBottom) / VRES       -- how full this voxel is
+        if frac >= 1 then
+          mrow[zi] = GRASS; orow[zi] = 1
+        elseif frac <= 0 then
+          mrow[zi] = AIR;   orow[zi] = 0
+        else
+          mrow[zi] = GRASS; orow[zi] = frac           -- partial = smooth surface
+        end
+      end
+      mcol[yi] = mrow; ocol[yi] = orow
     end
+    mat[xi] = mcol; occ[xi] = ocol
   end
-  pcall(function() Terrain:WriteVoxels(region, VRES, wm, wo) end)
-  if zv % 32 == 0 then task.wait() end
+  Terrain:WriteVoxels(region, VRES, mat, occ)
+  task.wait()
 end
 
 ----- 2. water -----------------------------------------------
@@ -461,6 +454,7 @@ end
 
 print(string.format("[Yesp] world build complete: %d buildings, %d road segments, %d water polys",
   tile.counts.buildings, tile.counts.roads, tile.counts.water))
+end)
 `;
 }
 

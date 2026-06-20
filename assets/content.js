@@ -473,7 +473,7 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
   html: () => `
     <span class="eyebrow">SERVER-RENDERED · TERRAIN · WATER · ROADS · BUILDINGS</span>
     <h1>Roblox World Server</h1>
-    <p class="lead">A heavier sibling of the World Builder. Your <strong>server</strong> does all the data gathering — elevation (SRTM), water, roads <em>and</em> building footprints from OpenStreetMap — and digests it into tiny JSON. Roblox fetches that JSON at runtime with <code class="inline-code">HttpService</code> and builds the world: terrain heights, water fill, road parts, and <strong>extruded boxy buildings</strong>. One tile at a time, default <strong>3 × 3 km</strong>.</p>
+    <p class="lead">A heavier sibling of the World Builder. Your <strong>server</strong> does all the data gathering — elevation (SRTM1, 30 m native), water, roads <em>and</em> building footprints from OpenStreetMap — and digests it into tiny JSON. You paste the generated script into the <strong>Studio Command Bar</strong>; it fetches that JSON once with <code class="inline-code">HttpService</code> and bakes the world into your place: terrain heights, water fill, road parts, and <strong>extruded boxy buildings</strong>. One tile at a time, default <strong>3 × 3 km</strong>.</p>
 
     <div class="callout info"><span class="ico">🧠</span><p>The split: HttpService can only move text, so the box pre-digests everything to numbers and sends it once per tile (cached on disk for instant re-fetch). Roblox just spawns cheap parts and paints terrain. Great in cities, patchy where OSM is sparse — it's procedural and blocky, but it's a real place.</p></div>
 
@@ -515,16 +515,17 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
       <button class="wb-copy" id="rw-copy" disabled>Copy script</button>
       <a class="wb-dl" id="rw-dl" aria-disabled="true">Download .lua</a>
     </div>
-    <div class="code wb-codebox"><div class="code-head"><span class="code-lang">lua · paste into ServerScriptService</span></div><pre><code id="rw-out">-- generate a script above. It fetches your server's /api/world/tile endpoint at runtime, so it stays tiny no matter how big the area is.</code></pre></div>
+    <div class="code wb-codebox"><div class="code-head"><span class="code-lang">lua · paste into the Studio Command Bar</span></div><pre><code id="rw-out">-- generate a script above. It fetches your server's /api/world/tile endpoint once, so it stays tiny no matter how big the area is.</code></pre></div>
 
     <h2 id="how">3 · Run it in Studio</h2>
     <ol class="wb-steps">
       <li>Open <strong>Roblox Studio</strong> on a new baseplate.</li>
       <li>Turn on HTTP: <strong>Game Settings → Security → Allow HTTP Requests</strong>.</li>
-      <li>Insert a <code class="inline-code">Script</code> in <code class="inline-code">ServerScriptService</code>, paste, and Play. It fetches the tile JSON and builds terrain, water, roads, and buildings.</li>
+      <li>Show the Command Bar: <strong>View → Command Bar</strong>.</li>
+      <li><strong>Copy</strong> the script above, paste it into the Command Bar, and press <kbd>Enter</kbd>. The world builds in <em>edit mode</em> — it's baked into your place and saved, with nothing to run at Play time.</li>
     </ol>
 
-    <div class="callout warn"><span class="ico">⚠️</span><p>The script calls <code class="inline-code">${location.origin}/api/world/tile</code> — that URL must be reachable from Roblox's servers (a public host, not <code class="inline-code">localhost</code>). HttpService is rate-limited (~500/min), so this loads <strong>one tile per run</strong>.</p></div>
+    <div class="callout warn"><span class="ico">⚠️</span><p>The script calls <code class="inline-code">${location.origin}/api/world/tile</code> — that URL must be reachable from Roblox (a public host, not <code class="inline-code">localhost</code>). It runs on a background thread so Studio stays responsive while terrain, water, roads and buildings appear.</p></div>
 
     ${pager({ href: '/world-builder', title: 'Real-World Terrain' }, { href: '/map-drive', title: 'Map Drive' })}
   `

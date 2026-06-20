@@ -69,7 +69,7 @@
       dl.href = URL.createObjectURL(new Blob([lua], { type: 'text/plain' }));
       dl.download = `roblox_tile_${lat}_${lng}_${size}m.lua`;
       $('#rw-stats').innerHTML = `Script ready — <b>${(lua.length / 1024).toFixed(1)} KB</b>. It fetches the tile JSON at runtime, so its size never changes with the area.`;
-      setStatus('Script generated. Copy it into a Script in ServerScriptService and Play.', 'ok');
+      setStatus('Script generated. Paste it into the Studio Command Bar (View → Command Bar) and press Enter.', 'ok');
     } catch (e) {
       setStatus('Could not generate the script: ' + e.message, 'err');
     }
