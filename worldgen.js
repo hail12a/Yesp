@@ -160,12 +160,61 @@ function simplify(pts, tol) {
   return out;
 }
 const ROAD_W = {
-  motorway:8, motorway_link:6, trunk:7, trunk_link:5,
-  primary:6, primary_link:5, secondary:5, secondary_link:4,
-  tertiary:4, tertiary_link:3, residential:3.5, living_street:3,
-  unclassified:3, service:2.5, track:2.5,
-  pedestrian:2, footway:1.5, path:1.5, cycleway:2,
+  motorway:22, motorway_link:12, trunk:18, trunk_link:11,
+  primary:15, primary_link:10, secondary:12, secondary_link:9,
+  tertiary:10, tertiary_link:8, residential:7, living_street:6,
+  unclassified:7, service:5, track:4,
+  pedestrian:4, footway:3, path:3, cycleway:3,
 };
+
+/* ---- oriented bounding box (min-area rectangle) for a footprint ----
+   Extruding the axis-aligned bbox turns rotated/L-shaped buildings into
+   huge slabs. The minimum-area rectangle hugs the footprint and gives a
+   properly oriented boxy building. */
+function convexHull(points) {
+  const pts = points.slice().sort((a, b) => a.x - b.x || a.z - b.z);
+  if (pts.length < 3) return pts;
+  const cross = (o, a, b) => (a.x - o.x) * (b.z - o.z) - (a.z - o.z) * (b.x - o.x);
+  const lower = [];
+  for (const p of pts) { while (lower.length >= 2 && cross(lower[lower.length-2], lower[lower.length-1], p) <= 0) lower.pop(); lower.push(p); }
+  const upper = [];
+  for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (upper.length >= 2 && cross(upper[upper.length-2], upper[upper.length-1], p) <= 0) upper.pop(); upper.push(p); }
+  lower.pop(); upper.pop();
+  return lower.concat(upper);
+}
+function minAreaRect(points) {
+  const hull = convexHull(points);
+  if (hull.length < 3) {
+    let minx=1e9,maxx=-1e9,minz=1e9,maxz=-1e9;
+    for (const p of points) { minx=Math.min(minx,p.x);maxx=Math.max(maxx,p.x);minz=Math.min(minz,p.z);maxz=Math.max(maxz,p.z); }
+    return { cx:(minx+maxx)/2, cz:(minz+maxz)/2, w:maxx-minx, d:maxz-minz, rot:0 };
+  }
+  let best = null;
+  for (let i = 0; i < hull.length; i++) {
+    const a = hull[i], b = hull[(i + 1) % hull.length];
+    const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    const ux = (b.x - a.x) / len, uz = (b.z - a.z) / len; // edge dir
+    const vx = -uz, vz = ux;                               // perpendicular
+    let minu=1e9,maxu=-1e9,minv=1e9,maxv=-1e9;
+    for (const p of hull) {
+      const du = (p.x-a.x)*ux + (p.z-a.z)*uz;
+      const dv = (p.x-a.x)*vx + (p.z-a.z)*vz;
+      if (du<minu) minu=du; if (du>maxu) maxu=du;
+      if (dv<minv) minv=dv; if (dv>maxv) maxv=dv;
+    }
+    const w = maxu-minu, d = maxv-minv, area = w*d;
+    if (!best || area < best.area) {
+      const cu=(minu+maxu)/2, cv=(minv+maxv)/2;
+      best = { area, cx: a.x+ux*cu+vx*cv, cz: a.z+uz*cu+vz*cv, w, d, rot: Math.atan2(uz, ux) };
+    }
+  }
+  return best;
+}
+function polyArea(pts) {
+  let s = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) s += (pts[j].x + pts[i].x) * (pts[j].z - pts[i].z);
+  return Math.abs(s) / 2;
+}
 
 async function fetchOSM(clat, clng, halfM, proj) {
   const dLat = halfM / M_PER_DEG_LAT;
@@ -203,10 +252,20 @@ async function fetchOSM(clat, clng, halfM, proj) {
       for (const g of geoms) {
         if (!g || g.length < 3) continue;
         let h = parseFloat(t.height);
-        if (!isFinite(h)) { const lv = parseFloat(t["building:levels"]); h = isFinite(lv) ? lv * 3.2 : 8; }
+        if (!isFinite(h)) { const lv = parseFloat(t["building:levels"]); h = isFinite(lv) ? lv * 3.2 : 7; }
         h = Math.max(3, Math.min(400, h));
-        const pts = simplify(g.map(p => proj(p.lat, p.lon)), 0.3);
-        if (pts.length >= 3) buildings.push({ h: +h.toFixed(1), pts });
+        const pts = g.map(p => proj(p.lat, p.lon));
+        const area = polyArea(pts);
+        // drop degenerate slivers and absurdly large polygons (mistagged landuse)
+        if (area < 6 || area > 250000) continue;
+        const r = minAreaRect(pts);
+        if (!r || r.w < 1 || r.d < 1) continue;
+        buildings.push({
+          h: +h.toFixed(1),
+          cx: +r.cx.toFixed(2), cz: +r.cz.toFixed(2),
+          w: +r.w.toFixed(2), d: +r.d.toFixed(2),
+          rot: +r.rot.toFixed(4),
+        });
       }
       continue;
     }
@@ -223,8 +282,8 @@ async function fetchOSM(clat, clng, halfM, proj) {
         geoms = el.members.filter(m => m.geometry && m.role !== "inner").map(m => m.geometry);
       for (const g of geoms) {
         if (!g || g.length < 3) continue;
-        const pts = simplify(g.map(p => proj(p.lat, p.lon)), 0.5);
-        if (pts.length >= 3) water.push(pts);
+        const pts = simplify(g.map(p => proj(p.lat, p.lon)), 1);
+        if (pts.length >= 3 && polyArea(pts) >= 150) water.push(pts); // skip tiny puddles that render as speckle
       }
     }
   }
@@ -235,7 +294,7 @@ async function fetchOSM(clat, clng, halfM, proj) {
    Main entry: build (or load) a tile
    ========================================================= */
 function tileKey(lat, lng, size) {
-  return crypto.createHash("sha1").update(`v2_${lat.toFixed(5)}_${lng.toFixed(5)}_${size}`).digest("hex").slice(0, 16);
+  return crypto.createHash("sha1").update(`v3_${lat.toFixed(5)}_${lng.toFixed(5)}_${size}`).digest("hex").slice(0, 16);
 }
 async function buildTile(lat, lng, size) {
   size = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(size) || 3000));
@@ -407,45 +466,53 @@ for _, poly in ipairs(tile.water) do
   task.wait()
 end
 
------ 3. roads -----------------------------------------------
+----- 3. roads (raised flat ribbons that follow the terrain) -
 print("[Yesp] placing roads…")
 local roadFolder = Instance.new("Folder")
 roadFolder.Name = "Roads"; roadFolder.Parent = Workspace
+local rSeg = 0
 for _, road in ipairs(tile.roads) do
   for i = 1, #road.pts - 1 do
     local a, b = road.pts[i], road.pts[i+1]
     local ax,az,bx,bz = a.x,a.z,b.x,b.z
-    local len = math.max(0.2, math.sqrt((bx-ax)^2+(bz-az)^2))
-    local mx, mz = (ax+bx)/2, (az+bz)/2
-    local gy = worldY(mx, mz) + 0.15
-    local p = Instance.new("Part")
-    p.Anchored=true; p.CanCollide=false; p.CastShadow=false
-    p.Size=Vector3.new(road.w, 0.3, len)
-    p.Color=Color3.fromRGB(55,55,60); p.Material=Enum.Material.Asphalt
-    p.CFrame=CFrame.new(Vector3.new(mx,gy,mz), Vector3.new(bx,gy,bz))
-    p.Parent=roadFolder
+    local len = math.sqrt((bx-ax)^2+(bz-az)^2)
+    if len > 0.5 then
+      local mx, mz = (ax+bx)/2, (az+bz)/2
+      -- average the two endpoint ground heights and sit clearly on top
+      local gy = (worldY(ax,az) + worldY(bx,bz)) / 2 + 0.9
+      local p = Instance.new("Part")
+      p.Anchored=true; p.CanCollide=false; p.CastShadow=false
+      p.TopSurface=Enum.SurfaceType.Smooth; p.BottomSurface=Enum.SurfaceType.Smooth
+      p.Size=Vector3.new(road.w, 1.0, len + road.w*0.5) -- overlap joints so corners connect
+      p.Color=Color3.fromRGB(48,48,52); p.Material=Enum.Material.Asphalt
+      p.CFrame=CFrame.new(Vector3.new(mx,gy,mz), Vector3.new(bx,gy,bz))
+      p.Parent=roadFolder
+      rSeg += 1
+      if rSeg % 250 == 0 then task.wait() end
+    end
   end
 end
 
------ 4. buildings (extruded footprint boxes) ----------------
+----- 4. buildings (oriented footprint boxes) ----------------
 print("[Yesp] placing buildings…")
 local bldFolder = Instance.new("Folder")
 bldFolder.Name="Buildings"; bldFolder.Parent=Workspace
+local palette = {
+  Color3.fromRGB(196,188,176), Color3.fromRGB(176,170,162),
+  Color3.fromRGB(158,150,140), Color3.fromRGB(184,176,168),
+  Color3.fromRGB(150,148,150),
+}
 local batchCount = 0
 for _, b in ipairs(tile.buildings) do
-  local minx,maxx,minz,maxz = math.huge,-math.huge,math.huge,-math.huge
-  for _,p in ipairs(b.pts) do
-    if p.x<minx then minx=p.x end; if p.x>maxx then maxx=p.x end
-    if p.z<minz then minz=p.z end; if p.z>maxz then maxz=p.z end
-  end
-  local w, d = maxx-minx, maxz-minz
-  if w >= 1 and d >= 1 then
-    local cx, cz = (minx+maxx)/2, (minz+maxz)/2
-    local gy = worldY(cx,cz)
+  if b.w >= 1 and b.d >= 1 then
+    local gy = worldY(b.cx, b.cz)
     local part = Instance.new("Part")
-    part.Anchored=true; part.Size=Vector3.new(w, b.h, d)
-    part.Position=Vector3.new(cx, gy+b.h/2, cz)
-    part.Color=Color3.fromRGB(148,143,134); part.Material=Enum.Material.Concrete
+    part.Anchored=true
+    part.TopSurface=Enum.SurfaceType.Smooth; part.BottomSurface=Enum.SurfaceType.Smooth
+    part.Size=Vector3.new(b.w, b.h, b.d)
+    -- sink the base 1.5 m into the ground so it never floats on slopes
+    part.CFrame=CFrame.new(b.cx, gy + b.h/2 - 1.5, b.cz) * CFrame.Angles(0, -b.rot, 0)
+    part.Color=palette[(batchCount % #palette) + 1]; part.Material=Enum.Material.Concrete
     part.Parent=bldFolder
   end
   batchCount += 1
