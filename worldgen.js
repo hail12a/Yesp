@@ -233,7 +233,6 @@ async function fetchOSM(clat, clng, halfM, proj) {
     `way["natural"="water"](${bbox});relation["natural"="water"](${bbox});`+
     `way["water"](${bbox});relation["water"](${bbox});`+
     `way["waterway"="riverbank"](${bbox});`+
-    `way["natural"="coastline"](${bbox});`+
     `);out geom;`;
 
   const mirrors = [
@@ -300,7 +299,7 @@ async function fetchOSM(clat, clng, halfM, proj) {
       });
       continue;
     }
-    if (t.natural === "water" || t.water || t.waterway === "riverbank" || t.natural === "coastline") {
+    if (t.natural === "water" || t.water || t.waterway === "riverbank") {
       let geoms = [];
       if (el.type === "way" && el.geometry) geoms = [el.geometry];
       else if (el.type === "relation" && el.members)
@@ -319,7 +318,7 @@ async function fetchOSM(clat, clng, halfM, proj) {
    Main entry: build (or load) a tile
    ========================================================= */
 function tileKey(lat, lng, size) {
-  return crypto.createHash("sha1").update(`v8_${lat.toFixed(5)}_${lng.toFixed(5)}_${size}`).digest("hex").slice(0, 16);
+  return crypto.createHash("sha1").update(`v9_${lat.toFixed(5)}_${lng.toFixed(5)}_${size}`).digest("hex").slice(0, 16);
 }
 async function buildTile(lat, lng, size) {
   size = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(size) || 3000));
@@ -329,16 +328,16 @@ async function buildTile(lat, lng, size) {
 
   const halfM = size / 2;
   const proj  = makeProj(lat, lng);
-  const [elev, osm] = await Promise.all([
-    buildElevationGrid(lat, lng, halfM),
-    fetchOSM(lat, lng, halfM, proj),
-  ]);
+  // Flat-ground design: no terrain, so we skip the SRTM elevation download
+  // entirely.  This makes tiles build far faster and shrinks the JSON from
+  // megabytes (a heightmap grid) to kilobytes (just feature geometry).
+  const osm = await fetchOSM(lat, lng, halfM, proj);
 
   const tile = {
-    v: 3,
+    v: 4,
     center: { lat: +lat.toFixed(6), lng: +lng.toFixed(6) },
     size, halfM,
-    elevation: elev,
+    flat: true,
     water:     osm.water,
     roads:     osm.roads,
     buildings: osm.buildings,
@@ -346,7 +345,12 @@ async function buildTile(lat, lng, size) {
     osmOk: osm.ok,
     built: Date.now(),
   };
-  try { fs.writeFileSync(cacheFile, JSON.stringify(tile)); } catch (_) {}
+  // Only cache a successful OSM fetch.  If Overpass was down we got an empty
+  // tile — caching that would leave the area permanently blank; instead we
+  // return it uncached so the next request retries.
+  if (osm.ok) {
+    try { fs.writeFileSync(cacheFile, JSON.stringify(tile)); } catch (_) {}
+  }
   return { ...tile, cached: false };
 }
 
@@ -360,8 +364,8 @@ async function buildTile(lat, lng, size) {
               where OSM places them — no height jitter, no clipping
      • Buildings: concrete box Parts with base on the ground plane
      • Water: flat semi-transparent blue Parts where OSM shows water
-   Scale: SCALE studs per metre (default 3 = matches default Roblox
-   character proportions; change at top of the generated script).
+   Scale: SCALE studs per metre (default 3.571 = exact Roblox scale,
+   1 stud = 0.28 m; change at the top of the generated script).
    ========================================================= */
 function robloxScript(host, lat, lng, size) {
   const ep = `${host}/api/world/tile?lat=${lat}&lng=${lng}&size=${size}`;
@@ -369,7 +373,7 @@ function robloxScript(host, lat, lng, size) {
   const l = s => L.push(s);
 
   l(`--[[`);
-  l(`  Yesp Real-World Renderer v7  —  paste into Studio Command Bar`);
+  l(`  Yesp Real-World Renderer v9  —  paste into Studio Command Bar`);
   l(`  (View → Command Bar) then press Enter.`);
   l(``);
   l(`  Tile: ${size} x ${size} m  centred on (${lat}, ${lng})`);
@@ -403,7 +407,7 @@ function robloxScript(host, lat, lng, size) {
   l(`if not ok then warn("[Yesp] fetch failed: "..tostring(raw)); return end`);
   l(`local tile = HttpService:JSONDecode(raw)`);
   l(`print(string.format(`);
-  l(`  "[Yesp] %d bldgs  %d roads  %d water  |  tile %dx%d m  |  SCALE=%d (1 stud=%.2fm)",`);
+  l(`  "[Yesp] %d bldgs  %d roads  %d water  |  tile %dx%d m  |  SCALE=%.3f (1 stud=%.2fm)",`);
   l(`  tile.counts.buildings, tile.counts.roads, tile.counts.water,`);
   l(`  tile.size, tile.size, SCALE, 1/SCALE))`);
   l(``);
@@ -424,29 +428,58 @@ function robloxScript(host, lat, lng, size) {
   l(`ground.Parent        = Workspace`);
   l(``);
   l(`-- 2. Water ───────────────────────────────────────────────────────`);
-  l(`-- Flat blue Parts sitting just above the ground for each OSM water polygon.`);
+  l(`-- Each OSM water polygon is rastered into flat blue tiles using a`);
+  l(`-- point-in-polygon test, so an L-shaped river or curved lake keeps its`);
+  l(`-- real shape instead of being flooded as one giant bounding rectangle.`);
   l(`print("[Yesp] placing water…")`);
   l(`local waterFolder = Instance.new("Folder")`);
   l(`waterFolder.Name = "Water"; waterFolder.Parent = Workspace`);
-  l(`for _, poly in ipairs(tile.water) do`);
-  l(`  local mnx, mxx, mnz, mxz = math.huge, -math.huge, math.huge, -math.huge`);
-  l(`  for _, pt in ipairs(poly) do`);
-  l(`    if pt.x < mnx then mnx = pt.x end; if pt.x > mxx then mxx = pt.x end`);
-  l(`    if pt.z < mnz then mnz = pt.z end; if pt.z > mxz then mxz = pt.z end`);
+  l(`local function pip(poly, px, pz)   -- point-in-polygon (ray cast)`);
+  l(`  local inside, n, j = false, #poly, #poly`);
+  l(`  for i = 1, n do`);
+  l(`    local a, b = poly[i], poly[j]`);
+  l(`    if ((a.z > pz) ~= (b.z > pz)) and`);
+  l(`       (px < (b.x - a.x) * (pz - a.z) / (b.z - a.z) + a.x) then`);
+  l(`      inside = not inside`);
+  l(`    end`);
+  l(`    j = i`);
   l(`  end`);
-  l(`  if mxx > mnx and mxz > mnz then`);
-  l(`    local wp = Instance.new("Part")`);
-  l(`    wp.Anchored      = true`);
-  l(`    wp.CanCollide    = false`);
-  l(`    wp.TopSurface    = Enum.SurfaceType.Smooth`);
-  l(`    wp.BottomSurface = Enum.SurfaceType.Smooth`);
-  l(`    wp.Size          = Vector3.new(S(mxx-mnx), 0.5, S(mxz-mnz))`);
-  l(`    wp.CFrame        = CFrame.new(S((mnx+mxx)*0.5), 0.25, S((mnz+mxz)*0.5))`);
-  l(`    wp.Material      = Enum.Material.SmoothPlastic`);
-  l(`    wp.Color         = Color3.fromRGB(28, 100, 168)`);
-  l(`    wp.Transparency  = 0.35`);
-  l(`    wp.Name          = "Water"`);
-  l(`    wp.Parent        = waterFolder`);
+  l(`  return inside`);
+  l(`end`);
+  l(`local wCount = 0`);
+  l(`for _, poly in ipairs(tile.water) do`);
+  l(`  if #poly >= 3 then`);
+  l(`    local mnx, mxx, mnz, mxz = math.huge, -math.huge, math.huge, -math.huge`);
+  l(`    for _, pt in ipairs(poly) do`);
+  l(`      if pt.x < mnx then mnx = pt.x end; if pt.x > mxx then mxx = pt.x end`);
+  l(`      if pt.z < mnz then mnz = pt.z end; if pt.z > mxz then mxz = pt.z end`);
+  l(`    end`);
+  l(`    -- adaptive cell size (metres): big lakes use coarser cells to keep`);
+  l(`    -- the part count sane; small ponds get finer detail`);
+  l(`    local maxDim = math.max(mxx - mnx, mxz - mnz)`);
+  l(`    local cell   = math.clamp(maxDim / 40, 6, 50)`);
+  l(`    for wz = mnz, mxz, cell do`);
+  l(`      for wx = mnx, mxx, cell do`);
+  l(`        local cx, cz = wx + cell * 0.5, wz + cell * 0.5`);
+  l(`        if pip(poly, cx, cz) then`);
+  l(`          local wp = Instance.new("Part")`);
+  l(`          wp.Anchored      = true`);
+  l(`          wp.CanCollide    = false`);
+  l(`          wp.CastShadow    = false`);
+  l(`          wp.TopSurface    = Enum.SurfaceType.Smooth`);
+  l(`          wp.BottomSurface = Enum.SurfaceType.Smooth`);
+  l(`          wp.Size          = Vector3.new(S(cell) + 0.5, 0.5, S(cell) + 0.5)`);
+  l(`          wp.CFrame        = CFrame.new(S(cx), 0.3, S(cz))`);
+  l(`          wp.Material      = Enum.Material.SmoothPlastic`);
+  l(`          wp.Color         = Color3.fromRGB(28, 100, 168)`);
+  l(`          wp.Transparency  = 0.3`);
+  l(`          wp.Name          = "Water"`);
+  l(`          wp.Parent        = waterFolder`);
+  l(`          wCount += 1`);
+  l(`          if wCount % 400 == 0 then task.wait() end`);
+  l(`        end`);
+  l(`      end`);
+  l(`    end`);
   l(`  end`);
   l(`  task.wait()`);
   l(`end`);
@@ -551,7 +584,7 @@ function robloxScript(host, lat, lng, size) {
   l(`end`);
   l(``);
   l(`print(string.format(`);
-  l(`  "[Yesp] done — %d buildings  %d road segs  %d water  (SCALE=%d, 1 stud=%.2fm)",`);
+  l(`  "[Yesp] done — %d buildings  %d road segs  %d water  (SCALE=%.3f, 1 stud=%.2fm)",`);
   l(`  tile.counts.buildings, rSeg, tile.counts.water, SCALE, 1/SCALE))`);
   l(`end)`);
 

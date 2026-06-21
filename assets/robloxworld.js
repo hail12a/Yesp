@@ -42,8 +42,7 @@
       const c = t.counts || {};
       $('#rw-stats').innerHTML =
         `<b>${c.buildings || 0}</b> buildings · <b>${c.roads || 0}</b> roads · <b>${c.water || 0}</b> water bodies · ` +
-        `elevation <b>${t.elevation ? t.elevation.source : '?'}</b> ` +
-        `(${t.elevation ? t.elevation.minH + '–' + t.elevation.maxH + ' m' : ''}) · ` +
+        `flat ground (no terrain) · ` +
         `${t.cached ? 'served from cache' : 'freshly built'}`;
       setStatus(`Tile ready: ${c.buildings || 0} buildings, ${c.roads || 0} roads, ${c.water || 0} water. ${t.cached ? '(cached)' : '(built + cached)'}`, 'ok');
     } catch (e) {
