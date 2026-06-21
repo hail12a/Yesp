@@ -319,7 +319,7 @@ async function fetchOSM(clat, clng, halfM, proj) {
    Main entry: build (or load) a tile
    ========================================================= */
 function tileKey(lat, lng, size) {
-  return crypto.createHash("sha1").update(`v7_${lat.toFixed(5)}_${lng.toFixed(5)}_${size}`).digest("hex").slice(0, 16);
+  return crypto.createHash("sha1").update(`v8_${lat.toFixed(5)}_${lng.toFixed(5)}_${size}`).digest("hex").slice(0, 16);
 }
 async function buildTile(lat, lng, size) {
   size = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(size) || 3000));
@@ -378,8 +378,9 @@ function robloxScript(host, lat, lng, size) {
   l(`  Buildings: box Parts, real OSM footprints, real OSM heights.`);
   l(`  Water: flat blue Parts over OSM water polygons.`);
   l(``);
-  l(`  SCALE = 3  →  looks right with default Roblox character  (recommended)`);
-  l(`  SCALE = 1  →  true 1:1 metre`);
+  l(`  SCALE = 3.571  →  exact Roblox scale (1 stud = 0.28 m, matches default char)  ← default`);
+  l(`  SCALE = 3      →  slightly loose, good for top-down overview`);
+  l(`  SCALE = 1      →  true 1:1 metre (character looks enormous)`);
   l(`  Requires: Game Settings → Security → Allow HTTP Requests = ON`);
   l(`--]]`);
   l(``);
@@ -387,7 +388,10 @@ function robloxScript(host, lat, lng, size) {
   l(`local Workspace   = game:GetService("Workspace")`);
   l(``);
   l(`local ENDPOINT = "${ep}"`);
-  l(`local SCALE    = 3      -- studs per real-world metre (change to 1 for true 1:1)`);
+  l(`-- Roblox: 1 stud = 0.28 m  →  1 m = 1/0.28 = 3.571 studs.`);
+  l(`-- Using this value means every road width, segment length and building`);
+  l(`-- dimension is the exact real-world size in Roblox's own unit system.`);
+  l(`local SCALE = 3.571   -- studs per real-world metre  (DO NOT change unless you know why)`);
   l(``);
   l(`local function S(m) return m * SCALE end   -- metres → studs`);
   l(``);
