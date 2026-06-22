@@ -531,6 +531,34 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
   `
 },
 
+/* ----------------------- CPU BUILDER ----------------------- */
+'/cpu-builder': {
+  section: 'cpu', title: 'CPU Builder',
+  html: () => `
+    <span class="eyebrow">SANDBOX · CIRCUIT WIRING · TYPED PORTS · AI MARKET</span>
+    <h1>Silicon — CPU Builder</h1>
+    <p class="lead">Buy components from the marketplace, drop them on the blueprint, and <strong>wire their typed ports together</strong> like a chip architect — clock to control, control to ALU, cache between registers and the memory controller, the memory controller out to memory and the northbridge. Get the graph right and the CPU <em>works</em>; then the physics kicks in (clock, heat, thermal throttle) and an <strong>AI buyer</strong> decides whether your chip is worth the price.</p>
+
+    <div class="callout info"><span class="ico">🔌</span><p><strong>Wiring rules are strict.</strong> Each port has a type — <b>clock</b>, <b>data</b>, <b>address</b>, <b>control</b> — and a direction. A wire only connects matching types with compatible directions (an output to an input or bus). Click a port, then click a compatible one to wire them. Compatible ports glow when you start a wire. Click a wire to delete it.</p></div>
+
+    <div id="cpu-app" class="cpu-app"><!-- the game mounts here --></div>
+
+    <h2 id="how">How to build a working CPU</h2>
+    <ol class="wb-steps">
+      <li><strong>Buy the eight core blocks</strong> (Clock, Control Unit, ALU, Registers, a Cache tier, Memory Controller, Memory, Northbridge). Southbridge is optional.</li>
+      <li><strong>Wire the clock</strong> out to the Control Unit, ALU, Registers and Memory Controller — every timed block needs it.</li>
+      <li><strong>Data path:</strong> ALU ↔ Registers ↔ Cache ↔ Memory Controller ↔ Memory, plus Memory Controller ↔ Northbridge ↔ Memory. The Memory Controller's <b>address</b> output must reach Memory.</li>
+      <li><strong>Control lines:</strong> Control Unit → ALU.</li>
+      <li>When the error list is clear, the CPU works. <strong>Tune the price</strong> against the buyer's fair value and <strong>List for sale</strong>. Selling ships the parts, so you rebuild from the marketplace.</li>
+      <li><strong>Upgrade the fab</strong> (lower nm) to raise the clock ceiling and slash heat — the path to high-value chips.</li>
+    </ol>
+
+    <div class="callout tip"><span class="ico">🔥</span><p><strong>The physics:</strong> heat ≈ nm × GHz. Old, large transistors running fast get hot, and past <b>88&nbsp;°C</b> the chip thermal-throttles — real clock drops, performance and stability fall. Lower nm runs cooler <em>and</em> clocks higher, so tech upgrades pay off twice. Bigger cache boosts performance but adds heat and cost.</p></div>
+
+    ${pager({ href: '/map-drive', title: 'Map Drive' }, { href: '/quantum', title: 'Quantum Lab' })}
+  `
+},
+
 /* ----------------------- MAP DRIVE ----------------------- */
 '/map-drive': {
   section: 'drive', title: 'Map Drive',
