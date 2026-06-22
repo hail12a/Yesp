@@ -541,11 +541,11 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
 
     <div class="callout info"><span class="ico">🔌</span><p><strong>Wiring rules are strict.</strong> Each port has a type — <b>clock</b>, <b>data</b>, <b>address</b>, <b>control</b> — and a direction. A wire only connects matching types with compatible directions (an output to an input or bus). Click a port, then click a compatible one to wire them. Compatible ports glow when you start a wire. Click a wire to delete it.</p></div>
 
-    <div id="cpu-app" class="cpu-app"><!-- the game mounts here --></div>
+    <div id="cpu-app"><!-- the game mounts here --></div>
 
     <h2 id="how">How to build a working CPU</h2>
     <ol class="wb-steps">
-      <li><strong>Buy the eight core blocks</strong> (Clock, Control Unit, ALU, Registers, a Cache tier, Memory Controller, Memory, Northbridge). Southbridge is optional.</li>
+      <li><strong>Buy the eight core blocks</strong> (Clock, Control Unit, ALU, Registers, a Cache tier, Memory Controller, Memory, Northbridge) from the <b>Shop</b> tab.</li>
       <li><strong>Wire the clock</strong> out to the Control Unit, ALU, Registers and Memory Controller — every timed block needs it.</li>
       <li><strong>Data path:</strong> ALU ↔ Registers ↔ Cache ↔ Memory Controller ↔ Memory, plus Memory Controller ↔ Northbridge ↔ Memory. The Memory Controller's <b>address</b> output must reach Memory.</li>
       <li><strong>Control lines:</strong> Control Unit → ALU.</li>
