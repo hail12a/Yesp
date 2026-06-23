@@ -1,4 +1,4 @@
-/* cpubuilder.js — Silicon CPU Builder v2 */
+/* cpubuilder.js — Silicon CPU Builder v3 */
 (function () {
   'use strict';
 
@@ -7,6 +7,8 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const money = n => '$' + Math.round(n).toLocaleString();
   const starsStr = n => '★'.repeat(clamp(n,0,5)) + '☆'.repeat(clamp(5-n,0,5));
+  const fmt1 = n => +n.toFixed(1);
+  const fmt2 = n => +n.toFixed(2);
 
   const PORT = {
     clk:  { label: 'clock',   color: '#e0a23c' },
@@ -30,16 +32,16 @@
   const CATALOG = {
     clock: {
       name: 'Clock Generator', tag: 'CLK', price: 40, color: '#e0a23c',
-      desc: 'Drives every timed block. Required by all clocked components.',
+      desc: 'Drives every timed block.',
       ports: [{ id: 'clk', label: 'clk out', type: 'clk', dir: 'out' }],
     },
     control: {
       name: 'Control Unit', tag: 'CU', price: 65, color: '#cf6f5a',
       desc: 'Decodes instructions and steers the ALU with control lines.',
       ports: [
-        { id: 'clk',  label: 'clk',      type: 'clk',  dir: 'in'  },
-        { id: 'ctrl', label: 'ctrl out',  type: 'ctrl', dir: 'out' },
-        { id: 'data', label: 'data',      type: 'data', dir: 'io'  },
+        { id: 'clk',  label: 'clk',     type: 'clk',  dir: 'in'  },
+        { id: 'ctrl', label: 'ctrl out', type: 'ctrl', dir: 'out' },
+        { id: 'data', label: 'data',     type: 'data', dir: 'io'  },
       ],
     },
     alu: {
@@ -120,18 +122,18 @@
     cacheL3: cacheDef('L3 Cache', 'L3', 250, 1.34, 14, 10, '#2c8f6f'),
     memctrl: {
       name: 'Memory Controller', tag: 'MC', price: 125, color: '#cf8f5a',
-      desc: 'Bridges Cache ↔ Memory ↔ Northbridge and drives the address bus.',
+      desc: 'Bridges Cache ↔ Memory ↔ Northbridge.',
       ports: [
-        { id: 'clk',   label: 'clk',      type: 'clk',  dir: 'in'  },
-        { id: 'cache', label: 'cache',     type: 'data', dir: 'io'  },
-        { id: 'addr',  label: 'addr out',  type: 'addr', dir: 'out' },
-        { id: 'mem',   label: 'mem',       type: 'data', dir: 'io'  },
-        { id: 'nb',    label: 'north',     type: 'data', dir: 'io'  },
+        { id: 'clk',   label: 'clk',     type: 'clk',  dir: 'in'  },
+        { id: 'cache', label: 'cache',    type: 'data', dir: 'io'  },
+        { id: 'addr',  label: 'addr out', type: 'addr', dir: 'out' },
+        { id: 'mem',   label: 'mem',      type: 'data', dir: 'io'  },
+        { id: 'nb',    label: 'north',    type: 'data', dir: 'io'  },
       ],
     },
     memory: {
       name: 'Memory (RAM)', tag: 'RAM', price: 80, color: '#5acf9f',
-      desc: 'Main memory. Addressed by the Memory Controller.',
+      desc: 'Main memory.',
       ports: [
         { id: 'clk',  label: 'clk',  type: 'clk',  dir: 'in' },
         { id: 'addr', label: 'addr', type: 'addr', dir: 'in' },
@@ -175,7 +177,7 @@
     { a: 'northbridge', b: 'memory',      type: 'data', desc: 'Northbridge ↔ Memory (data)' },
   ];
 
-  /* NM TIERS — research-gated */
+  /* NM TIERS */
   const NM_TIERS = [
     { nm: 90,  clockCeil: 0.5,  heatK: 3.2,  researchCost: 0,     researchSec: 0,   fab: 5   },
     { nm: 65,  clockCeil: 1.0,  heatK: 2.6,  researchCost: 300,   researchSec: 30,  fab: 10  },
@@ -188,9 +190,42 @@
   ];
   const AMBIENT_C = 35, THROTTLE_C = 88;
 
-  /* HISTORICAL BLUEPRINTS
-     Wires: [typeA, portA, typeB, portB] — connects first matching instance of each type.
-     Every blueprint includes all 12 required wiring rules. */
+  /* DIE SIZE — base mm² at 45nm reference node */
+  const DIE_BASE_45 = {
+    clock: 1, control: 2, alu: 4, fpu: 3, decoder: 1.5, pipeline: 0.5,
+    core: 8, bpred: 1, pwr: 3, registers: 1.5,
+    cacheL1: 2,      // per 32 KB
+    cacheL2: 4,      // per 256 KB
+    cacheL3: 6,      // per MB
+    memctrl: 5, memory: 8, northbridge: 8, southbridge: 3,
+  };
+
+  /* DEFAULT PROPS per block type */
+  function defaultProps(type) {
+    const d = {
+      label: '', voltage: 1.1, powerW: null,
+    };
+    if (type === 'clock')      return { ...d, voltage: 1.1, baseMhz: 100, multiplier: 32 };
+    if (type === 'control')    return { ...d, voltage: 1.1, bpType: 'dynamic' };
+    if (type === 'alu')        return { ...d, voltage: 1.1, ghz: null, pipelineStages: 4, execUnits: 2 };
+    if (type === 'fpu')        return { ...d, voltage: 1.1, ghz: null, pipelineStages: 4, execUnits: 1 };
+    if (type === 'decoder')    return { ...d, voltage: 1.0 };
+    if (type === 'pipeline')   return { ...d, voltage: 1.0, stageDepth: 4, stallPenalty: 2 };
+    if (type === 'core')       return { ...d, voltage: 1.1, coreCount: 1, ghz: null };
+    if (type === 'bpred')      return { ...d, voltage: 1.0 };
+    if (type === 'pwr')        return { ...d, voltage: 1.0, tdpCap: 65, vrEfficiency: 90 };
+    if (type === 'registers')  return { ...d, voltage: 1.0, regCount: 32, regWidth: 64 };
+    if (type === 'cacheL1')    return { ...d, voltage: 1.0, sizeKB: 32,  assoc: 8,  latency: 4  };
+    if (type === 'cacheL2')    return { ...d, voltage: 1.0, sizeKB: 256, assoc: 8,  latency: 12 };
+    if (type === 'cacheL3')    return { ...d, voltage: 1.0, sizeMB: 6,   assoc: 16, latency: 40 };
+    if (type === 'memctrl')    return { ...d, voltage: 1.0, channels: 2, maxBandwidthGBs: 38.4 };
+    if (type === 'memory')     return { ...d, voltage: 1.35 };
+    if (type === 'northbridge')return { ...d, voltage: 1.0, busWidth: 64, busMhz: 800 };
+    if (type === 'southbridge')return { ...d, voltage: 1.0 };
+    return d;
+  }
+
+  /* HISTORICAL BLUEPRINTS */
   const BLUEPRINTS = [
     {
       id: 'athlon64', name: 'AMD Athlon 64',
@@ -213,7 +248,7 @@
     {
       id: 'pentiumII', name: 'Intel Pentium II',
       year: 1997, nmEra: 250, ghzEra: 0.333,
-      desc: 'P6 Slot 1. Klamath/Deschutes — 250nm, 233–333 MHz. Classic 90s CPU.',
+      desc: 'P6 Slot 1. Klamath/Deschutes — 250nm, 233–333 MHz.',
       components: ['clock','control','alu','fpu','registers','cacheL1','memctrl','memory','northbridge','southbridge'],
       wires: [
         ['clock','clk','control','clk'], ['clock','clk','alu','clk'],
@@ -231,7 +266,7 @@
     {
       id: 'pentium4', name: 'Intel Pentium 4',
       year: 2000, nmEra: 180, ghzEra: 1.5,
-      desc: 'Willamette / Northwood. NetBurst 20-stage pipeline. Up to 3.8 GHz.',
+      desc: 'Willamette/Northwood. NetBurst 20-stage pipeline.',
       components: ['clock','control','decoder','alu','fpu','pipeline','registers','cacheL1','cacheL2','memctrl','memory','northbridge','southbridge'],
       wires: [
         ['clock','clk','control','clk'], ['clock','clk','alu','clk'],
@@ -252,7 +287,7 @@
     {
       id: 'core2duo', name: 'Intel Core 2 Duo',
       year: 2006, nmEra: 65, ghzEra: 2.4,
-      desc: 'Conroe — 65nm. Massive IPC gain over NetBurst. Dual-core.',
+      desc: 'Conroe — 65nm. Massive IPC gain over NetBurst.',
       components: ['clock','control','decoder','bpred','alu','fpu','registers','cacheL1','cacheL2','cacheL3','memctrl','memory','northbridge'],
       wires: [
         ['clock','clk','control','clk'], ['clock','clk','alu','clk'],
@@ -274,7 +309,7 @@
     {
       id: 'i7920', name: 'Intel Core i7-920',
       year: 2008, nmEra: 45, ghzEra: 2.67,
-      desc: 'Nehalem — 45nm. First Core i7 with on-die memory controller. Quad-core.',
+      desc: 'Nehalem — 45nm. First Core i7 with on-die memory controller.',
       components: ['clock','control','decoder','bpred','alu','fpu','core','registers','cacheL1','cacheL2','cacheL3','memctrl','memory','northbridge','pwr'],
       wires: [
         ['clock','clk','control','clk'], ['clock','clk','alu','clk'],
@@ -297,7 +332,7 @@
     {
       id: 'i54570', name: 'Intel Core i5-4570',
       year: 2013, nmEra: 22, ghzEra: 3.2,
-      desc: 'Haswell — 22nm. AVX2, out-of-order execution, 3.2 GHz base.',
+      desc: 'Haswell — 22nm. AVX2, 3.2 GHz base.',
       components: ['clock','control','decoder','bpred','alu','fpu','pipeline','registers','cacheL1','cacheL2','cacheL3','memctrl','memory','northbridge','pwr'],
       wires: [
         ['clock','clk','control','clk'], ['clock','clk','alu','clk'],
@@ -320,7 +355,7 @@
     {
       id: 'xeonE31245', name: 'Intel Xeon E3-1245 v3',
       year: 2013, nmEra: 22, ghzEra: 3.4,
-      desc: 'Haswell server — 22nm. ECC memory, quad-core + HT, 3.4 GHz.',
+      desc: 'Haswell server — 22nm. ECC, quad-core + HT.',
       components: ['clock','control','decoder','bpred','alu','fpu','pipeline','core','registers','cacheL1','cacheL2','cacheL3','memctrl','memory','northbridge','southbridge','pwr'],
       wires: [
         ['clock','clk','control','clk'], ['clock','clk','alu','clk'],
@@ -346,10 +381,10 @@
   ];
 
   /* STATE */
-  const SAVE_KEY = 'yesp-cpu-v2';
+  const SAVE_KEY = 'yesp-cpu-v3';
   const NODE_W = 160, HEAD_H = 34, ROW_H = 26;
   const WORLD_W = 2400, WORLD_H = 1600;
-  let state, pending = null, uidSeq = 1;
+  let state, pending = null, selectedUid = null, uidSeq = 1;
   let zoom = 1, panX = 60, panY = 60;
   let isPanning = false, panStartX = 0, panStartY = 0;
   let researchTimer = null;
@@ -367,6 +402,8 @@
       const s = JSON.parse(localStorage.getItem(SAVE_KEY));
       if (s && typeof s.money === 'number' && Array.isArray(s.nodes)) {
         state = Object.assign(freshState(), s);
+        // Ensure all nodes have props
+        state.nodes.forEach(n => { if (!n.props) n.props = defaultProps(n.type); });
         uidSeq = Math.max(1, ...state.nodes.map(n => n.uid + 1), 1);
         return;
       }
@@ -435,6 +472,19 @@
     return { present, missing, unmet, orphans, works: missing.length === 0 && unmet.length === 0 && orphans.length === 0 };
   }
 
+  /* DIE SIZE */
+  function calcDieMm2() {
+    const nmScale = Math.pow(tier().nm / 45, 2);
+    return state.nodes.reduce((sum, n) => {
+      let base = DIE_BASE_45[n.type] || 1;
+      const p = n.props || {};
+      if (n.type === 'cacheL1') base = (2 / 32)  * (p.sizeKB || 32);
+      if (n.type === 'cacheL2') base = (4 / 256) * (p.sizeKB || 256);
+      if (n.type === 'cacheL3') base = 6 * (p.sizeMB || 6);
+      return sum + base * nmScale;
+    }, 0);
+  }
+
   /* STATS */
   function computeStats(v) {
     const t = tier();
@@ -444,12 +494,14 @@
     const extraData = Math.max(0, dataWires - RULES.filter(r => r.type === 'data').length);
     const completeness = RULES.length ? (RULES.length - v.unmet.length) / RULES.length : 0;
 
+    // Cache (best tier present)
     let cacheMult = 1, cacheHeat = 0, cachePower = 0;
     state.nodes.forEach(n => {
       const c = CATALOG[n.type]?.cache;
       if (c && c.mult > cacheMult) { cacheMult = c.mult; cacheHeat = c.heat; cachePower = c.power; }
     });
 
+    // Optional extras
     const hasFPU   = state.nodes.some(n => n.type === 'fpu');
     const pipeCnt  = state.nodes.filter(n => n.type === 'pipeline').length;
     const coreCnt  = state.nodes.filter(n => n.type === 'core').length;
@@ -457,41 +509,105 @@
     const hasDec   = state.nodes.some(n => n.type === 'decoder');
     const hasPwr   = state.nodes.some(n => n.type === 'pwr');
 
+    // Average voltage (affects heat)
+    const avgVoltage = state.nodes.length
+      ? state.nodes.reduce((s, n) => s + (n.props?.voltage || 1.1), 0) / state.nodes.length
+      : 1.1;
+    const voltHeatMult = Math.pow(avgVoltage / 1.1, 2);
+
+    // Clock — base computed, then modified by ALU ghz prop if set
+    const aluNode = state.nodes.find(n => n.type === 'alu');
+    const aluGhzOverride = aluNode?.props?.ghz;
     let ghz = t.clockCeil * (0.5 + 0.5 * completeness) + 0.08 * extraData;
     if (hasBPred) ghz += 0.10;
     if (hasDec)   ghz += 0.05;
-    ghz = clamp(ghz, 0, t.clockCeil);
+    // Manual override: if set, use it (may exceed ceiling → heat penalty applies later)
+    if (aluGhzOverride && aluGhzOverride > 0) ghz = aluGhzOverride;
+    const overclocked = ghz > t.clockCeil;
+    const ghzClamped = overclocked ? ghz : clamp(ghz, 0, t.clockCeil);
 
-    let heatBase = t.nm * ghz * t.heatK * 0.9 + cacheHeat;
+    // Heat
+    let heatBase = t.nm * ghzClamped * t.heatK * 0.9 * voltHeatMult + cacheHeat;
+    if (overclocked) heatBase *= (1 + (ghz - t.clockCeil) * 0.3); // OC heat penalty
     if (hasPwr) heatBase *= 0.88;
     let tempC = AMBIENT_C + heatBase;
 
     let throttle = 1;
     if (tempC > THROTTLE_C) {
       throttle = clamp(1 - (tempC - THROTTLE_C) * 0.02, 0.45, 1);
-      tempC = AMBIENT_C + (hasPwr ? 0.88 : 1) * t.nm * (ghz * throttle) * t.heatK * 0.9 + cacheHeat;
+      tempC = AMBIENT_C + (hasPwr ? 0.88 : 1) * t.nm * (ghzClamped * throttle) * t.heatK * 0.9 * voltHeatMult + cacheHeat;
     }
-    const effGhz = ghz * throttle;
-    const powerW = t.nm * effGhz * t.heatK * 0.5 + cachePower + 8 - (hasPwr ? 6 : 0);
+    const effGhz = ghzClamped * throttle;
 
+    // TDP from per-node power props
+    const tdpW = state.nodes.reduce((s, n) => {
+      if (n.props?.powerW != null) return s + n.props.powerW;
+      // auto-estimate
+      const base = { clock:3, control:5, alu:15, fpu:10, decoder:4, pipeline:5, core:20,
+                     bpred:3, pwr:2, registers:4, cacheL1:3, cacheL2:5, cacheL3:10,
+                     memctrl:8, memory:8, northbridge:10, southbridge:4 };
+      return s + (base[n.type] || 5);
+    }, 0);
+
+    const powerW = tdpW;
+
+    // Performance
     let perf = Math.round(effGhz * cacheMult * (1 + 0.04 * extraData) * 100);
-    if (hasFPU)     perf = Math.round(perf * 1.12);
+    if (hasFPU)      perf = Math.round(perf * 1.12);
     if (pipeCnt > 0) perf = Math.round(perf * (1 + 0.08 * Math.min(pipeCnt, 3)));
     if (coreCnt > 0) perf = Math.round(perf * (1 + 0.35 * Math.min(coreCnt, 4)));
-    if (hasBPred)   perf = Math.round(perf * 1.06);
-    if (hasDec)     perf = Math.round(perf * 1.05);
+    if (hasBPred)    perf = Math.round(perf * 1.06);
+    if (hasDec)      perf = Math.round(perf * 1.05);
 
     let stability = 100;
     if (tempC > THROTTLE_C) stability -= (tempC - THROTTLE_C) * 1.6;
     if (throttle < 1) stability -= 8;
-    if (ghz >= t.clockCeil - 0.001) stability -= 5;
+    if (overclocked) stability -= 10 + (ghz - t.clockCeil) * 15;
+    if (avgVoltage > 1.3) stability -= (avgVoltage - 1.3) * 20;
     if (hasPwr) stability += 5;
     if (v.present?.southbridge) stability += 4;
     stability = clamp(Math.round(stability), 0, 100);
 
-    return { ghz, effGhz, tempC: Math.round(tempC), powerW: Math.round(powerW),
-             perf, stability, throttle, cacheMult, extraData, dataWires,
-             coreCnt, pipeCnt, hasFPU, hasBPred, hasDec, hasPwr };
+    // Cache sizes from props
+    const l1Node = state.nodes.find(n => n.type === 'cacheL1');
+    const l2Node = state.nodes.find(n => n.type === 'cacheL2');
+    const l3Node = state.nodes.find(n => n.type === 'cacheL3');
+    const l1KB = l1Node?.props?.sizeKB || (l1Node ? 32 : 0);
+    const l2KB = l2Node?.props?.sizeKB || (l2Node ? 256 : 0);
+    const l3MB = l3Node?.props?.sizeMB || (l3Node ? 6 : 0);
+
+    // Memory channels
+    const mcNode = state.nodes.find(n => n.type === 'memctrl');
+    const memChannels = mcNode?.props?.channels || 2;
+    const maxBandwidthGBs = mcNode?.props?.maxBandwidthGBs || 38.4;
+
+    // Clock gen derived GHz
+    const clkNode = state.nodes.find(n => n.type === 'clock');
+    const baseMhz = clkNode?.props?.baseMhz || 100;
+    const multiplier = clkNode?.props?.multiplier || 32;
+    const derivedGhz = fmt2(baseMhz * multiplier / 1000);
+
+    // IPC tier
+    const ipcScore = (l2KB ? 1 : 0) + (l3MB ? 1 : 0) + (hasBPred ? 1 : 0) +
+                     (hasDec ? 1 : 0) + (pipeCnt > 0 ? 1 : 0);
+    const ipcTier = ipcScore >= 4 ? 'High' : ipcScore >= 2 ? 'Med' : 'Low';
+
+    // Total cores (1 base + extra core blocks)
+    const totalCores = 1 + coreCnt;
+    const singleThread = totalCores > 0 ? Math.round(perf / totalCores) : perf;
+
+    // Die size
+    const dieMm2 = fmt1(calcDieMm2());
+
+    return {
+      ghz: ghzClamped, effGhz, tempC: Math.round(tempC), powerW: Math.round(powerW),
+      tdpW: Math.round(tdpW), perf, stability, throttle, cacheMult,
+      extraData, dataWires, coreCnt, pipeCnt, hasFPU, hasBPred, hasDec, hasPwr,
+      overclocked, avgVoltage: fmt2(avgVoltage),
+      l1KB, l2KB, l3MB, memChannels, maxBandwidthGBs,
+      baseMhz, multiplier, derivedGhz,
+      ipcTier, totalCores, singleThread, dieMm2,
+    };
   }
 
   /* ECONOMY */
@@ -505,9 +621,7 @@
     return clamp(
       0.50 * clamp(st.perf / 900, 0, 1) +
       0.20 * clamp((95 - st.tempC) / 40, 0, 1) +
-      0.30 * (st.stability / 100),
-      0, 1
-    );
+      0.30 * (st.stability / 100), 0, 1);
   }
   function buyChance(st, works) {
     if (!works) return 0;
@@ -520,6 +634,19 @@
     const q = statsQuality(st);
     const ps = clamp(fv / Math.max(1, price), 0, 1.2);
     return clamp(Math.round((0.55 * q + 0.45 * Math.min(1, ps)) * 4) + 1, 1, 5);
+  }
+
+  /* PER-BLOCK WARNINGS */
+  function blockWarnings(node) {
+    const p = node.props || {};
+    const t = tier();
+    const warns = [];
+    if (p.voltage > 1.35) warns.push({ lvl: 'warn', msg: `High voltage ${p.voltage}V at ${t.nm}nm — heat penalty` });
+    if (p.voltage > 1.5)  warns.push({ lvl: 'err',  msg: `Dangerously high voltage — stability crash` });
+    if ((p.ghz || 0) > t.clockCeil) warns.push({ lvl: 'err', msg: `${p.ghz} GHz exceeds ${t.nm}nm ceiling (${t.clockCeil} GHz) — throttle & heat` });
+    if (node.type === 'cacheL1' && (p.sizeKB || 32) > 128 && t.nm >= 65) warns.push({ lvl: 'warn', msg: `L1 ${p.sizeKB}KB is unrealistic at ${t.nm}nm` });
+    if (node.type === 'cacheL3' && (p.sizeMB || 6) > 16 && t.nm >= 45) warns.push({ lvl: 'warn', msg: `L3 ${p.sizeMB}MB is unrealistic at ${t.nm}nm` });
+    return warns;
   }
 
   /* CANVAS DOM */
@@ -539,7 +666,6 @@
     if (!root) return;
     load(); checkResearch();
 
-    // Remove old global handlers
     if (_panMove) { document.removeEventListener('mousemove', _panMove); _panMove = null; }
     if (_panUp)   { document.removeEventListener('mouseup',   _panUp);   _panUp = null; }
 
@@ -560,14 +686,17 @@
     <button id="cpu2-reset">Reset</button>
   </div>
 </div>
-<div class="cpu2-canvas" id="cpu2-canvas">
-  <div class="cpu2-world" id="cpu2-world">
-    <svg class="cpu2-wires" id="cpu2-svg" width="${WORLD_W}" height="${WORLD_H}"></svg>
+<div class="cpu2-body">
+  <div class="cpu2-canvas" id="cpu2-canvas">
+    <div class="cpu2-world" id="cpu2-world">
+      <svg class="cpu2-wires" id="cpu2-svg" width="${WORLD_W}" height="${WORLD_H}"></svg>
+    </div>
+    <div class="cpu2-legend">
+      ${Object.entries(PORT).map(([k,v]) => `<span><i style="background:${v.color}"></i>${v.label}</span>`).join('')}
+      <span class="cpu2-legend-hint">Scroll=zoom · Drag bg=pan · Click port=wire · Click node=edit · Click wire=delete</span>
+    </div>
   </div>
-  <div class="cpu2-legend">
-    ${Object.entries(PORT).map(([k,v]) => `<span><i style="background:${v.color}"></i>${v.label}</span>`).join('')}
-    <span class="cpu2-legend-hint">Scroll=zoom · Drag bg=pan · Click port=wire · Click wire=delete</span>
-  </div>
+  <div class="cpu2-details" id="cpu2-details"></div>
 </div>
 <div class="cpu2-errstrip" id="cpu2-errstrip"></div>
 <div class="cpu2-sell-float" id="cpu2-sell-float"></div>
@@ -601,8 +730,8 @@
       if (e.button !== 0) return;
       const tgt = e.target;
       if (tgt === canvasEl || tgt === worldEl || tgt === svgEl ||
-          tgt.closest('.cpu2-legend') || tgt.classList.contains('cpu2-wires')) {
-        if (tgt.classList.contains('cpu2-wire-hit')) return;
+          tgt.closest?.('.cpu2-legend')) {
+        if (tgt.classList?.contains('cpu2-wire-hit')) return;
         isPanning = true;
         panStartX = e.clientX - panX;
         panStartY = e.clientY - panY;
@@ -636,7 +765,9 @@
     }, { passive: false });
 
     canvasEl.addEventListener('click', e => {
-      if (e.target === canvasEl || e.target === worldEl || e.target === svgEl) clearPending();
+      if (e.target === canvasEl || e.target === worldEl || e.target === svgEl) {
+        clearPending(); selectNode(null);
+      }
     });
 
     renderAll();
@@ -675,6 +806,7 @@
     renderStatus(v, st);
     renderErrStrip(v);
     renderSellFloat(v, st);
+    renderDetailsPanel(v, st);
     save();
   }
 
@@ -697,6 +829,253 @@
     el.innerHTML = items.join('');
   }
 
+  /* DETAILS PANEL */
+  function selectNode(uid) {
+    selectedUid = uid;
+    const v = validate(), st = computeStats(v);
+    renderDetailsPanel(v, st);
+    // refresh canvas to show selection ring
+    $$('.cpu2-node', worldEl).forEach(el => {
+      el.classList.toggle('selected', +el.dataset.uid === uid);
+    });
+  }
+
+  function renderDetailsPanel(v, st) {
+    const panel = $('#cpu2-details'); if (!panel) return;
+    const selNode = selectedUid != null ? nodeById(selectedUid) : null;
+    if (selNode) {
+      panel.innerHTML = renderBlockEditorHTML(selNode);
+      wireBlockEditor(selNode, panel, v, st);
+    } else {
+      panel.innerHTML = renderCpuOverviewHTML(v, st);
+      wireSellSection(panel, v, st);
+    }
+  }
+
+  /* CPU OVERVIEW */
+  function renderCpuOverviewHTML(v, st) {
+    const t = tier();
+    const cost = buildCost();
+    const fv = v.works ? fairValue(st) : 0;
+    const chance = buyChance(st, v.works);
+    const s5 = v.works ? starRating(st, state.price, true) : 0;
+
+    const row = (label, val, extra='') =>
+      `<div class="cpu2-drow"><span>${label}</span><b>${val}</b>${extra?`<small>${extra}</small>`:''}</div>`;
+
+    return `
+<div class="cpu2-det-head">CPU Details</div>
+<div class="cpu2-det-section">── Core Config ──</div>
+${row('Cores', st.totalCores)}
+${row('Base Clock', st.effGhz.toFixed(2) + ' GHz', st.overclocked ? '⚠ overclocked' : '')}
+${row('IPC Tier', st.ipcTier)}
+${row('Die Size', st.dieMm2 + ' mm²', t.nm + ' nm')}
+<div class="cpu2-det-section">── Memory ──</div>
+${st.l1KB ? row('L1 Cache', st.l1KB >= 1024 ? (st.l1KB/1024)+'MB' : st.l1KB+'KB') : ''}
+${st.l2KB ? row('L2 Cache', st.l2KB >= 1024 ? (st.l2KB/1024)+'MB' : st.l2KB+'KB') : ''}
+${st.l3MB ? row('L3 Cache', st.l3MB+'MB') : ''}
+${row('Mem Channels', st.memChannels)}
+${row('Max Bandwidth', st.maxBandwidthGBs+' GB/s')}
+<div class="cpu2-det-section">── Power & Thermals ──</div>
+${row('TDP', st.tdpW + ' W')}
+${row('Core Voltage', st.avgVoltage + ' V')}
+${row('Temp', st.tempC + '°C', st.throttle < 1 ? '⚠ throttled ×'+st.throttle.toFixed(2) : '')}
+${row('Stability', st.stability + '%')}
+<div class="cpu2-det-section">── Performance ──</div>
+${row('Perf Score', v.works ? st.perf : '—')}
+${row('Single-thread', v.works ? st.singleThread : '—')}
+${st.throttle < 1 ? `<div class="cpu2-det-warn">⚠ Throttle −${Math.round((1-st.throttle)*100)}%</div>` : ''}
+<div class="cpu2-det-section">── Sell ──</div>
+${v.works ? `<div class="cpu2-det-stars">${starsStr(s5)}</div>` : ''}
+${row('Build cost', money(cost))}
+${row('Fair value', v.works ? money(fv) : '—')}
+<label class="cpu2-det-pricelabel">Your price
+  <input type="number" id="cpu2-price" min="1" step="10" value="${state.price}" ${v.works?'':'disabled'}/>
+</label>
+<div class="cpu2-det-chance-row">
+  <div class="cpu2-bar"><i class="c-chance" style="width:${Math.round(chance*100)}%"></i></div>
+  <small>${v.works ? Math.round(chance*100)+'% buy chance' : 'finish the CPU first'}</small>
+</div>
+<div class="cpu2-det-margin ${state.price-cost>=0?'pos':'neg'}">Margin <b>${money(state.price-cost)}</b></div>
+<input class="cpu2-sf-name" id="cpu2-cpuname" type="text" placeholder="Name your CPU…" maxlength="40" value="${state.cpuName||''}" ${v.works?'':'disabled'}/>
+<button class="cpu2-sf-sell" id="cpu2-list" ${v.works?'':'disabled'}>List for sale</button>
+${state.log.length ? '<div class="cpu2-det-log">'+state.log.slice(0,4).map(e=>`<div class="cpu2-logline ${e.cls}">${e.text}</div>`).join('')+'</div>' : ''}`;
+  }
+
+  function wireSellSection(panel, v, st) {
+    const pi = panel.querySelector('#cpu2-price');
+    if (pi) pi.addEventListener('input', () => {
+      state.price = Math.max(1, parseInt(pi.value,10)||1);
+      const v2 = validate(), st2 = computeStats(v2), ch = buyChance(st2, v2.works);
+      const ci = panel.querySelector('.c-chance'); if (ci) ci.style.width = Math.round(ch*100)+'%';
+      const sm = panel.querySelector('.cpu2-det-chance-row small'); if (sm) sm.textContent = Math.round(ch*100)+'% buy chance';
+      const m = state.price - buildCost(), mEl = panel.querySelector('.cpu2-det-margin');
+      if (mEl) { mEl.className = 'cpu2-det-margin '+(m>=0?'pos':'neg'); mEl.innerHTML = `Margin <b>${money(m)}</b>`; }
+      save();
+    });
+    const ni = panel.querySelector('#cpu2-cpuname');
+    if (ni) ni.addEventListener('input', () => { state.cpuName = ni.value.slice(0,40); save(); });
+    const lb = panel.querySelector('#cpu2-list');
+    if (lb) lb.addEventListener('click', listForSale);
+  }
+
+  /* BLOCK EDITOR */
+  function renderBlockEditorHTML(node) {
+    const def = CATALOG[node.type];
+    if (!def) return '';
+    const p = node.props || {};
+    const t = tier();
+    const warns = blockWarnings(node);
+    const label = p.label || def.name;
+
+    const field = (lbl, html) =>
+      `<label class="cpu2-ef-row"><span>${lbl}</span>${html}</label>`;
+    const num = (id, val, min, max, step=1) =>
+      `<input class="cpu2-ef-num" data-prop="${id}" type="number" value="${val}" min="${min}" max="${max}" step="${step}">`;
+    const sel = (id, val, opts) =>
+      `<select class="cpu2-ef-sel" data-prop="${id}">${opts.map(o=>
+        `<option value="${o.v}" ${o.v==val?'selected':''}>${o.l}</option>`).join('')}</select>`;
+    const slider = (id, val, min, max, step=0.1) =>
+      `<div class="cpu2-ef-slider-wrap">
+        <input class="cpu2-ef-slider" data-prop="${id}" type="range" value="${val}" min="${min}" max="${max}" step="${step}">
+        <input class="cpu2-ef-num sm" data-prop="${id}" type="number" value="${val}" min="${min}" max="${max}" step="${step}">
+       </div>`;
+
+    let specific = '';
+    if (node.type === 'clock') {
+      const derived = fmt2((p.baseMhz||100) * (p.multiplier||32) / 1000);
+      specific = field('Base (MHz)', num('baseMhz', p.baseMhz||100, 50, 500, 10)) +
+                 field('Multiplier', num('multiplier', p.multiplier||32, 1, 100)) +
+                 `<div class="cpu2-ef-derived">→ ${derived} GHz</div>`;
+    }
+    if (node.type === 'alu' || node.type === 'fpu') {
+      specific = field('GHz override', slider('ghz', p.ghz||t.clockCeil, 0.1, t.clockCeil*1.2, 0.05)) +
+                 `<small class="cpu2-ef-hint">Leave at ${t.clockCeil} for tier default. Above ceiling = heat+instability.</small>` +
+                 field('Pipeline stages', num('pipelineStages', p.pipelineStages||4, 1, 20)) +
+                 field('Exec units', num('execUnits', p.execUnits||2, 1, 8));
+    }
+    if (node.type === 'control') {
+      specific = field('Branch predictor',
+        sel('bpType', p.bpType||'dynamic', [
+          {v:'static',l:'Static'},{v:'dynamic',l:'Dynamic'},{v:'hybrid',l:'Hybrid'}
+        ]));
+    }
+    if (node.type === 'registers') {
+      specific = field('Register count',
+        sel('regCount', p.regCount||32, [8,16,32,64,128,256].map(n=>({v:n,l:n})))) +
+        field('Register width',
+          sel('regWidth', p.regWidth||64, [8,16,32,64,128].map(n=>({v:n,l:n+'-bit'}))));
+    }
+    if (node.type === 'cacheL1') {
+      specific = field('Size (KB)',
+        sel('sizeKB', p.sizeKB||32, [8,16,32,64,128,256].map(n=>({v:n,l:n+' KB'})))) +
+        field('Associativity', sel('assoc', p.assoc||8, [2,4,8,16].map(n=>({v:n,l:n+'-way'})))) +
+        field('Latency (cycles)', num('latency', p.latency||4, 1, 20));
+    }
+    if (node.type === 'cacheL2') {
+      specific = field('Size (KB)',
+        sel('sizeKB', p.sizeKB||256, [64,128,256,512,1024].map(n=>({v:n,l:n>=1024?n/1024+'MB':n+' KB'})))) +
+        field('Associativity', sel('assoc', p.assoc||8, [2,4,8,16].map(n=>({v:n,l:n+'-way'})))) +
+        field('Latency (cycles)', num('latency', p.latency||12, 1, 50));
+    }
+    if (node.type === 'cacheL3') {
+      specific = field('Size (MB)',
+        sel('sizeMB', p.sizeMB||6, [1,2,4,6,8,12,16,24,32].map(n=>({v:n,l:n+' MB'})))) +
+        field('Associativity', sel('assoc', p.assoc||16, [4,8,16,32].map(n=>({v:n,l:n+'-way'})))) +
+        field('Latency (cycles)', num('latency', p.latency||40, 10, 200, 5));
+    }
+    if (node.type === 'memctrl') {
+      specific = field('Channels', sel('channels', p.channels||2, [1,2,4,8].map(n=>({v:n,l:n+' ch'})))) +
+                 field('Max bandwidth', num('maxBandwidthGBs', p.maxBandwidthGBs||38.4, 5, 200, 0.1) + ' GB/s');
+    }
+    if (node.type === 'northbridge') {
+      specific = field('Bus width', sel('busWidth', p.busWidth||64, [32,64,128,256].map(n=>({v:n,l:n+'-bit'})))) +
+                 field('Bus speed', num('busMhz', p.busMhz||800, 100, 3200, 50) + ' MHz');
+    }
+    if (node.type === 'pipeline') {
+      specific = field('Stage depth', num('stageDepth', p.stageDepth||4, 1, 32)) +
+                 field('Stall penalty', num('stallPenalty', p.stallPenalty||2, 0, 20) + ' cycles');
+    }
+    if (node.type === 'core') {
+      specific = field('GHz override', slider('ghz', p.ghz||t.clockCeil, 0.1, t.clockCeil*1.2, 0.05)) +
+                 field('Core count', num('coreCount', p.coreCount||1, 1, 32));
+    }
+    if (node.type === 'pwr') {
+      specific = field('TDP cap', num('tdpCap', p.tdpCap||65, 10, 500) + ' W') +
+                 field('VR efficiency', num('vrEfficiency', p.vrEfficiency||90, 50, 99) + ' %');
+    }
+
+    const warnHtml = warns.map(w =>
+      `<div class="cpu2-ef-warn ${w.lvl}">${w.lvl==='err'?'✖':'⚠'} ${w.msg}</div>`).join('');
+
+    return `
+<div class="cpu2-det-head">
+  <span style="color:${def.color};font-weight:800">${def.tag}</span> ${def.name}
+  <button class="cpu2-ef-close" id="cpu2-ef-close" title="Close editor">×</button>
+</div>
+${warnHtml}
+<div class="cpu2-ef-form">
+  ${field('Label', `<input class="cpu2-ef-text" data-prop="label" type="text" value="${p.label||''}" placeholder="${def.name}">`)}
+  ${field('Voltage', slider('voltage', p.voltage||1.1, 0.6, 2.0, 0.05) + ' V')}
+  ${field('Power draw', num('powerW', p.powerW!=null?p.powerW:'', 0, 500) + ' W <small style="color:var(--ink-faint)">(blank=auto)</small>')}
+  ${specific}
+</div>`;
+  }
+
+  function wireBlockEditor(node, panel, v, st) {
+    const closeBtn = panel.querySelector('#cpu2-ef-close');
+    if (closeBtn) closeBtn.addEventListener('click', () => { selectNode(null); });
+
+    // Wire all inputs/selects with data-prop
+    panel.querySelectorAll('[data-prop]').forEach(input => {
+      const prop = input.dataset.prop;
+      const isSlider = input.type === 'range';
+      const handler = () => {
+        let val = input.type === 'number' || isSlider ? parseFloat(input.value) : input.value;
+        if (input.type === 'number' && input.value === '') val = null;
+        if (!isNaN(val) || val === null || typeof val === 'string') {
+          node.props[prop] = val;
+          // Sync paired slider/number
+          if (isSlider || (input.classList.contains('sm') && input.type === 'number')) {
+            panel.querySelectorAll(`[data-prop="${prop}"]`).forEach(el => {
+              if (el !== input) el.value = val;
+            });
+          }
+          // Update clock derived GHz display
+          if (node.type === 'clock' && (prop === 'baseMhz' || prop === 'multiplier')) {
+            const d = panel.querySelector('.cpu2-ef-derived');
+            if (d) d.textContent = '→ ' + fmt2((node.props.baseMhz||100)*(node.props.multiplier||32)/1000) + ' GHz';
+          }
+          save();
+          // Lightweight re-render of just the stats
+          const v2 = validate(), st2 = computeStats(v2);
+          renderStatus(v2, st2);
+          renderErrStrip(v2);
+          renderSellFloat(v2, st2);
+          // Refresh warnings in editor
+          const warnContainer = panel.querySelector('.cpu2-ef-warn');
+          const newWarns = blockWarnings(node);
+          const existingWarns = panel.querySelectorAll('.cpu2-ef-warn');
+          existingWarns.forEach(w => w.remove());
+          const form = panel.querySelector('.cpu2-ef-form');
+          newWarns.forEach(w => {
+            const d = document.createElement('div');
+            d.className = `cpu2-ef-warn ${w.lvl}`;
+            d.textContent = (w.lvl==='err'?'✖':'⚠') + ' ' + w.msg;
+            panel.insertBefore(d, form);
+          });
+          // Update node display name if label changed
+          if (prop === 'label') {
+            const nameEl = worldEl?.querySelector(`.cpu2-node[data-uid="${node.uid}"] .cpu2-nname`);
+            if (nameEl) nameEl.textContent = val || CATALOG[node.type]?.name || '';
+          }
+        }
+      };
+      input.addEventListener('change', handler);
+      if (input.type === 'range' || input.type === 'text') input.addEventListener('input', handler);
+    });
+  }
+
   /* CANVAS */
   function renderCanvas() {
     if (!worldEl || !svgEl) return;
@@ -710,14 +1089,16 @@
     if (!def) return document.createElement('div');
     const lay = portLayout(node);
     const el = document.createElement('div');
-    el.className = 'cpu2-node';
+    el.className = 'cpu2-node' + (node.uid === selectedUid ? ' selected' : '');
     el.style.cssText = `left:${node.x}px;top:${node.y}px;width:${NODE_W}px;height:${lay.h}px;--c:${def.color}`;
     el.dataset.uid = node.uid;
+    const displayName = node.props?.label || def.name;
+    const warns = blockWarnings(node);
 
     const portRow = (p, side) => {
-      const isSel   = pending?.uid === node.uid && pending?.port === p.id;
-      const isComp  = pending && !isSel && pending.uid !== node.uid
-                      ? canConnect(pending.uid, pending.port, node.uid, p.id).ok : false;
+      const isSel  = pending?.uid === node.uid && pending?.port === p.id;
+      const isComp = pending && !isSel && pending.uid !== node.uid
+                     ? canConnect(pending.uid, pending.port, node.uid, p.id).ok : false;
       return `<div class="cpu2-prow ${side}">
         <span class="cpu2-dot${isSel?' sel':''}${isComp?' compat':''}"
           style="--pc:${PORT[p.type].color}"
@@ -730,7 +1111,8 @@
     el.innerHTML = `
       <div class="cpu2-head" data-drag="${node.uid}">
         <span class="cpu2-tag2" style="background:${def.color}">${def.tag}</span>
-        <span class="cpu2-nname">${def.name}</span>
+        <span class="cpu2-nname">${displayName}</span>
+        ${warns.length ? `<span class="cpu2-node-warn" title="${warns[0].msg}">${warns[0].lvl==='err'?'✖':'⚠'}</span>` : ''}
         <button class="cpu2-del" data-del="${node.uid}" title="Remove (70% refund)">×</button>
       </div>
       <div class="cpu2-ports">
@@ -783,16 +1165,23 @@
     setTimeout(() => { const v = validate(); renderStatus(v, computeStats(v)); }, 2000);
   }
 
-  /* DRAG */
+  /* DRAG — clicking without moving selects the node */
   function startDrag(e, node) {
     if (e.button !== 0) return;
     e.stopPropagation(); e.preventDefault();
     isPanning = false;
+    const startX = e.clientX, startY = e.clientY;
+    let moved = false;
     const wp0 = screenToWorld(e.clientX, e.clientY);
     const offX = wp0.x - node.x, offY = wp0.y - node.y;
     const el = worldEl.querySelector(`.cpu2-node[data-uid="${node.uid}"]`);
-    if (el) el.classList.add('dragging');
+
     const move = ev => {
+      if (!moved && (Math.abs(ev.clientX-startX) > 4 || Math.abs(ev.clientY-startY) > 4)) {
+        moved = true;
+        if (el) el.classList.add('dragging');
+      }
+      if (!moved) return;
       const wp = screenToWorld(ev.clientX, ev.clientY);
       node.x = clamp(wp.x - offX, 0, WORLD_W - NODE_W);
       node.y = clamp(wp.y - offY, 0, WORLD_H - portLayout(node).h);
@@ -802,7 +1191,13 @@
     const up = () => {
       document.removeEventListener('mousemove', move);
       document.removeEventListener('mouseup', up);
-      if (el) el.classList.remove('dragging'); save();
+      if (el) el.classList.remove('dragging');
+      if (!moved) {
+        // tap = select for editing
+        selectNode(selectedUid === node.uid ? null : node.uid);
+      } else {
+        save();
+      }
     };
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up);
@@ -814,6 +1209,7 @@
     state.nodes = state.nodes.filter(n => n.uid !== uid);
     state.wires = state.wires.filter(w => w.aUid !== uid && w.bUid !== uid);
     if (pending?.uid === uid) pending = null;
+    if (selectedUid === uid) selectedUid = null;
     renderAll();
   }
 
@@ -840,46 +1236,18 @@
     save();
   }
 
-  /* SELL FLOAT PANEL */
+  /* SELL FLOAT (minimal — full details in right panel) */
   function renderSellFloat(v, st) {
     const el = $('#cpu2-sell-float'); if (!el) return;
     const cost = buildCost();
-    const fv = v.works ? fairValue(st) : 0;
-    const chance = buyChance(st, v.works);
-    const s5 = v.works ? starRating(st, state.price, true) : 0;
-
     el.innerHTML = `
       <div class="cpu2-sf-hd">
         <span class="${v.works?'ok':'bad'}">${v.works?'● READY':'● BUILDING'}</span>
-        ${v.works ? `<span class="cpu2-sf-stars">${starsStr(s5)}</span>` : ''}
+        ${v.works ? `<span style="font-size:11px;color:var(--ink-soft)">${st.effGhz.toFixed(2)} GHz · ${st.tempC}°C</span>` : ''}
       </div>
-      ${v.works ? `<div class="cpu2-sf-stat">Perf <b>${st.perf}</b> · ${st.effGhz.toFixed(2)} GHz · ${st.tempC}°C · ${st.stability}%</div>` : ''}
       <div class="cpu2-sf-row">Cost <b>${money(cost)}</b></div>
-      <div class="cpu2-sf-row">Fair val <b>${v.works ? money(fv) : '—'}</b></div>
-      <label>Price
-        <input type="number" id="cpu2-price" min="1" step="10" value="${state.price}" ${v.works?'':'disabled'}/>
-      </label>
-      <div class="cpu2-bar"><i class="c-chance" style="width:${Math.round(chance*100)}%"></i></div>
-      <small>${v.works ? Math.round(chance*100)+'% buy chance' : 'finish the CPU first'}</small>
-      <div class="cpu2-sf-margin ${state.price-cost>=0?'pos':'neg'}">Margin <b>${money(state.price-cost)}</b></div>
-      <input class="cpu2-sf-name" id="cpu2-cpuname" type="text" placeholder="Name your CPU…" maxlength="40" value="${state.cpuName||''}" ${v.works?'':'disabled'}/>
-      <button class="cpu2-sf-sell" id="cpu2-list" ${v.works?'':'disabled'}>List for sale</button>
-      ${state.log.length ? '<div class="cpu2-sf-log">'+state.log.slice(0,4).map(e=>`<div class="cpu2-logline ${e.cls}">${e.text}</div>`).join('')+'</div>' : ''}`;
-
-    const pi = $('#cpu2-price');
-    if (pi) pi.addEventListener('input', () => {
-      state.price = Math.max(1, parseInt(pi.value,10)||1);
-      const v2 = validate(), st2 = computeStats(v2), ch = buyChance(st2, v2.works);
-      const ci = el.querySelector('.c-chance'); if (ci) ci.style.width = Math.round(ch*100)+'%';
-      const sm = el.querySelector('small'); if (sm) sm.textContent = Math.round(ch*100)+'% buy chance';
-      const m = state.price - buildCost(), mEl = el.querySelector('.cpu2-sf-margin');
-      if (mEl) { mEl.className = 'cpu2-sf-margin '+(m>=0?'pos':'neg'); mEl.innerHTML = `Margin <b>${money(m)}</b>`; }
-      save();
-    });
-    const ni = $('#cpu2-cpuname');
-    if (ni) ni.addEventListener('input', () => { state.cpuName = ni.value.slice(0,40); save(); });
-    const lb = $('#cpu2-list');
-    if (lb) lb.addEventListener('click', listForSale);
+      ${v.works ? `<div class="cpu2-sf-row">Perf <b>${st.perf}</b> · Die <b>${st.dieMm2} mm²</b></div>` : ''}
+      <div style="font-size:10.5px;color:var(--ink-faint);margin-top:4px">Click node to edit · See right panel to sell</div>`;
   }
 
   /* LIST FOR SALE */
@@ -895,10 +1263,10 @@
       const s5 = starRating(st, state.price, true);
       state.soldCPUs.unshift({ name, price: state.price, stars: s5, perf: st.perf,
         ghz: +st.effGhz.toFixed(2), tempC: st.tempC, stability: st.stability,
-        nm: tier().nm, date: Date.now() });
+        nm: tier().nm, dieMm2: st.dieMm2, date: Date.now() });
       state.soldCPUs = state.soldCPUs.slice(0, 20);
       state.log.unshift({ text: `✔ ${name} SOLD ${money(state.price)} · ${starsStr(s5)} · perf ${st.perf}`, cls: 'ok' });
-      state.nodes = []; state.wires = []; state.cpuName = ''; pending = null;
+      state.nodes = []; state.wires = []; state.cpuName = ''; pending = null; selectedUid = null;
     } else {
       state.log.unshift({ text: `✗ ${name} passed at ${money(state.price)} (${Math.round(chance*100)}% chance). Lower price or improve.`, cls: 'bad' });
     }
@@ -948,12 +1316,12 @@
         cnt.innerHTML = `<div class="cpu2-parts-grid">${partOrder.map(id => {
           const c = CATALOG[id];
           const can = state.money >= c.price;
-          const extra = c.cache ? ` · ×${c.cache.mult} perf` : c.optional ? '' : '';
+          const extra = c.cache ? ` · ×${c.cache.mult} perf` : '';
           return `<div class="cpu2-pcard${can?'':' poor'}">
             <div class="cpu2-pcard-top">
               <span class="cpu2-ptag" style="background:${c.color}">${c.tag}</span>
               <div>
-                <div class="cpu2-pname">${c.name}${c.optional?'<em> optional</em>':''}</div>
+                <div class="cpu2-pname">${c.name}${c.optional?'<em> opt</em>':''}</div>
                 <div class="cpu2-pprice">${money(c.price)}${extra}</div>
               </div>
             </div>
@@ -970,9 +1338,9 @@
             <div class="cpu2-bpcard-top">
               <b>${bp.name}</b><span class="cpu2-bpyear">${bp.year}</span>
             </div>
-            <div class="cpu2-bpmeta">${bp.nmEra} nm · ${bp.ghzEra < 1 ? Math.round(bp.ghzEra*1000)+' MHz' : bp.ghzEra.toFixed(2)+' GHz'}</div>
+            <div class="cpu2-bpmeta">${bp.nmEra} nm · ${bp.ghzEra<1?Math.round(bp.ghzEra*1000)+' MHz':bp.ghzEra.toFixed(2)+' GHz'}</div>
             <p class="cpu2-bpdesc">${bp.desc}</p>
-            <div class="cpu2-bptags">${[...new Set(bp.components)].map(t => `<span class="cpu2-ptag sm" style="background:${CATALOG[t]?.color||'#888'}">${CATALOG[t]?.tag||t}</span>`).join('')}</div>
+            <div class="cpu2-bptags">${[...new Set(bp.components)].map(t=>`<span class="cpu2-ptag sm" style="background:${CATALOG[t]?.color||'#888'}">${CATALOG[t]?.tag||t}</span>`).join('')}</div>
             <button class="cpu2-bpimport" data-bp="${bp.id}">Import Blueprint</button>
           </div>`).join('')}</div>`;
         $$('.cpu2-bpimport', cnt).forEach(b => b.addEventListener('click', () => {
@@ -986,7 +1354,7 @@
     const c = CATALOG[id]; if (!c || state.money < c.price) return;
     state.money -= c.price;
     const n = state.nodes.length;
-    state.nodes.push({ uid: uidSeq++, type: id,
+    state.nodes.push({ uid: uidSeq++, type: id, props: defaultProps(id),
       x: clamp(100 + (n % 6) * 210 + (n%2)*20, 8, WORLD_W - NODE_W - 8),
       y: clamp(80 + Math.floor(n/6) * 180, 8, WORLD_H - 180) });
     save(); renderAll();
@@ -996,14 +1364,14 @@
   function importBlueprint(id) {
     const bp = BLUEPRINTS.find(b => b.id === id); if (!bp) return;
     if (state.nodes.length > 0 && !confirm(`Replace current blueprint with ${bp.name}?`)) return;
-    state.nodes = []; state.wires = []; pending = null;
+    state.nodes = []; state.wires = []; pending = null; selectedUid = null;
 
     const typeInstances = {};
     bp.components.forEach(type => {
       if (!CATALOG[type]) return;
       const uid = uidSeq++;
       (typeInstances[type] = typeInstances[type] || []).push(uid);
-      state.nodes.push({ uid, type, x: 0, y: 0 });
+      state.nodes.push({ uid, type, props: defaultProps(type), x: 0, y: 0 });
     });
 
     bp.wires.forEach(([tA, pA, tB, pB]) => {
@@ -1025,7 +1393,7 @@
         <h2>Research &amp; Development</h2>
         <button class="cpu2-mclose" id="cpu2-mclose">×</button>
       </div>
-      <p class="cpu2-res-intro">Unlock smaller process nodes for higher clocks and lower heat. Research is time-gated.</p>
+      <p class="cpu2-res-intro">Unlock smaller process nodes for higher clocks and lower heat.</p>
       <div class="cpu2-res-list" id="cpu2-res-list"></div>`;
     $('#cpu2-mclose').addEventListener('click', closeModal);
     updateResearchProgress();
@@ -1085,7 +1453,7 @@
               <b>${c.name}</b>
               <span class="cpu2-cc-stars">${starsStr(c.stars)}</span>
             </div>
-            <div class="cpu2-cc-specs">${c.nm} nm · ${c.ghz} GHz · Perf ${c.perf} · ${c.tempC}°C · ${c.stability}% stable</div>
+            <div class="cpu2-cc-specs">${c.nm} nm · ${c.ghz} GHz · Perf ${c.perf} · ${c.tempC}°C · ${c.stability}% stable${c.dieMm2?' · '+c.dieMm2+' mm²':''}</div>
             <div class="cpu2-cc-price">Sold for ${money(c.price)} · ${new Date(c.date).toLocaleDateString()}</div>
           </div>`).join('')
       }</div>`;
@@ -1095,9 +1463,8 @@
   /* ENTRY POINT */
   window.wireCpuBuilder = function wireCpuBuilder() {
     if (!$('#cpu-app')) return;
-    pending = null; isPanning = false;
+    pending = null; isPanning = false; selectedUid = null;
     if (researchTimer) { clearInterval(researchTimer); researchTimer = null; }
-    // fullscreen mode
     document.body.classList.add('cpu-fullscreen');
     const cleanup = () => {
       document.body.classList.remove('cpu-fullscreen');
