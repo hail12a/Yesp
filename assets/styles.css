@@ -1571,3 +1571,62 @@ body.cpu-fullscreen #cpu-app {
 }
 
 @keyframes fadeIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ===== AI Cores — scrollable core list ===== */
+.ailist {
+  display: flex; flex-direction: column; gap: 10px;
+  max-height: 62vh; overflow-y: auto; padding: 4px;
+  margin: 18px 0 4px;
+  scrollbar-width: thin;
+}
+.ailist-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--bg-soft); text-decoration: none; color: inherit;
+  transition: border-color .15s, transform .1s, background .15s;
+}
+.ailist-row:hover { border-color: var(--accent); transform: translateY(-1px); background: var(--bg); }
+.ailist-emoji {
+  flex-shrink: 0; width: 46px; height: 46px; border-radius: 11px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; background: var(--bg-code); border: 1px solid var(--border);
+}
+.ailist-main { flex: 1; min-width: 0; }
+.ailist-name { font-size: 15px; font-weight: 700; color: var(--ink); display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.ailist-tag {
+  font-size: 11px; font-weight: 600; color: var(--accent-ink);
+  background: var(--accent-soft); padding: 2px 8px; border-radius: 20px;
+}
+.ailist-sub { font-size: 12.5px; color: var(--ink-soft); margin-top: 3px; line-height: 1.45;
+  overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ailist-meta { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 7px; width: 128px; }
+.ailist-metric { display: flex; align-items: center; gap: 8px; width: 100%; }
+.ailist-power { flex: 1; height: 7px; border-radius: 4px; background: var(--border); overflow: hidden; }
+.ailist-power i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, #e0a23c, var(--accent)); }
+.ailist-power.over i { background: linear-gradient(90deg, var(--accent), #7c5cff); }
+.ailist-pct { font-size: 12px; font-family: var(--mono); font-weight: 700; color: var(--ink); min-width: 34px; text-align: right; }
+.ailist-arrow { flex-shrink: 0; font-size: 24px; color: var(--ink-faint); font-weight: 400; }
+.ailist-row:hover .ailist-arrow { color: var(--accent); }
+
+/* hide the row meta block on very narrow screens */
+@media (max-width: 560px) {
+  .ailist-meta { width: 74px; }
+  .ailist-metric .ailist-power { display: none; }
+}
+
+/* back link on detail pages */
+.ai-back {
+  display: inline-flex; align-items: center; gap: 5px; margin-bottom: 10px;
+  font-size: 13px; font-weight: 600; color: var(--ink-soft); text-decoration: none;
+}
+.ai-back:hover { color: var(--accent-ink); }
+
+/* power meter over-100 (beats GPT-2) */
+.aicore-power-label b.over { color: #7c5cff; margin-left: 4px; }
+.aicore-meter.over { box-shadow: 0 0 0 1px #7c5cff33; position: relative; }
+.aicore-meter.over i { background: linear-gradient(90deg, var(--accent), #7c5cff); }
+.aicore-meter-over {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  font-size: 10px; font-weight: 800; color: #fff; letter-spacing: .03em;
+  text-shadow: 0 1px 2px rgba(0,0,0,.4);
+}
