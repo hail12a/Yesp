@@ -1468,3 +1468,77 @@ body.cpu-fullscreen #cpu-app {
   color: var(--ink-faint); font-size: 13px; text-align: center; padding: 24px;
 }
 .cpu2-det-empty-icon { font-size: 32px; }
+
+/* ===== AI Cores page ===== */
+.aicore-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 4px; }
+.aicore-sub { margin: 4px 0 0; color: var(--ink-soft); font-size: 13.5px; }
+.aicore-badge {
+  flex-shrink: 0; padding: 4px 11px; border-radius: 20px;
+  font-size: 11px; font-weight: 800; letter-spacing: .06em;
+}
+.aicore-badge.stable       { background: #d4edda; color: #1a7a3b; }
+.aicore-badge.flagship     { background: var(--accent-soft); color: var(--accent-ink); }
+.aicore-badge.experimental { background: #e7defb; color: #5a3aa0; }
+[data-theme="dark"] .aicore-badge.stable       { background: #1a3d2a; color: #5fd98f; }
+[data-theme="dark"] .aicore-badge.experimental { background: #2a1f45; color: #b79cf0; }
+
+/* power meter */
+.aicore-power { margin: 18px 0 22px; }
+.aicore-power-label { font-size: 14px; color: var(--ink-soft); margin-bottom: 6px; }
+.aicore-power-label b { font-size: 22px; color: var(--ink); font-family: var(--mono); margin: 0 2px 0 4px; }
+.aicore-power-label span { font-size: 12.5px; color: var(--ink-faint); }
+.aicore-meter { height: 12px; border-radius: 7px; background: var(--border); overflow: hidden; }
+.aicore-meter i {
+  display: block; height: 100%; border-radius: 7px;
+  background: linear-gradient(90deg, #e0a23c, var(--accent)); transition: width .6s ease;
+}
+.aicore-power-legend { font-size: 12.5px; color: var(--ink-faint); margin-top: 7px; }
+
+/* spec grid */
+.aicore-specs {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px; margin: 20px 0;
+}
+.aicore-spec {
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-soft);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.aicore-spec span { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-faint); font-weight: 700; }
+.aicore-spec b { font-size: 14px; color: var(--ink); }
+
+.aicore-h { margin: 24px 0 8px; font-size: 15px; }
+
+/* flow diagram */
+.aicore-flow {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 7px;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg-code); margin: 10px 0; font-family: var(--mono); font-size: 12.5px;
+}
+.aicore-flow.sub { background: var(--bg-soft); font-size: 12px; }
+.aicore-flow span {
+  padding: 4px 9px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); color: var(--ink);
+}
+.aicore-flow span.hl { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.aicore-flow em { color: var(--ink-faint); font-style: normal; font-weight: 700; }
+
+/* bio mechanism grid */
+.aicore-mech { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 12px 0; }
+.aicore-m { padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-soft); }
+.aicore-m b { display: block; font-size: 13px; color: var(--accent-ink); margin-bottom: 5px; }
+.aicore-m p { margin: 0; font-size: 12.5px; color: var(--ink-soft); line-height: 1.5; }
+
+/* download button */
+.aicore-dl {
+  display: inline-flex; align-items: center; gap: 8px; margin-top: 20px;
+  padding: 11px 20px; border-radius: 10px; background: var(--accent); color: #fff;
+  font-weight: 700; font-size: 14px; text-decoration: none; transition: opacity .15s, transform .1s;
+}
+.aicore-dl:hover { opacity: .9; transform: translateY(-1px); }
+
+/* comparison table */
+.aicore-table-wrap { overflow-x: auto; margin: 12px 0; }
+.aicore-table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 520px; }
+.aicore-table th, .aicore-table td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.aicore-table thead th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint); }
+.aicore-table tbody tr:hover { background: var(--bg-soft); }
+.aicore-table td b { color: var(--ink); }
