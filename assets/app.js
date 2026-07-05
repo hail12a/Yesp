@@ -86,6 +86,15 @@
       $('#' + btn.dataset.tab, strip).classList.add('active');
     }));
 
+    // nested sub-tabs (scoped to their own .subtabs container)
+    $$('.subtab-btn').forEach(btn => btn.addEventListener('click', () => {
+      const strip = btn.closest('.subtabs');
+      $$('.subtab-btn', strip).forEach(b => b.classList.remove('active'));
+      $$('.subtab-panel', strip).forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      $('#' + btn.dataset.subtab, strip).classList.add('active');
+    }));
+
     // accordion
     $$('.acc-head').forEach(h => h.addEventListener('click', () =>
       h.closest('.acc-item').classList.toggle('open')));

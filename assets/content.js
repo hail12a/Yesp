@@ -18,6 +18,15 @@ const tabs = (id, items) => {
   return `<div class="tabs"><div class="tab-strip">${strip}</div>${panels}</div>`;
 };
 
+/* nested tabs — distinct classes so the outer .tabs wiring never touches them */
+const subtabs = (id, items) => {
+  const strip = items.map((t, i) =>
+    `<button class="subtab-btn${i === 0 ? ' active' : ''}" data-subtab="${id}-${i}">${t.label}</button>`).join('');
+  const panels = items.map((t, i) =>
+    `<div class="subtab-panel${i === 0 ? ' active' : ''}" id="${id}-${i}">${t.body}</div>`).join('');
+  return `<div class="subtabs"><div class="subtab-strip">${strip}</div>${panels}</div>`;
+};
+
 const accordion = items => `<div class="accordion">${items.map(it => `
   <div class="acc-item">
     <button class="acc-head"><span class="acc-ico">${it.ico}</span>${it.title}
@@ -730,56 +739,173 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
         <a class="aicore-dl" href="assets/cores/kitlernet_v3x.py" download>⬇ Download kitlernet_v3x.py</a>
       ` },
 
-      /* ============ MaximalBio ============ */
-      { label: '🧬 MaximalBio — Spiking', body: `
+      /* ============ MaximalBio — a family of bio/plastic models ============ */
+      { label: '🧬 MaximalBio — Bio Lab', body: `
         <div class="aicore-head">
           <div>
-            <h3 style="margin:0">KitlerNet-MaximalBio</h3>
-            <p class="aicore-sub">A biologically extreme spiking cortical network — six interacting brain mechanisms, no plain backprop MLP</p>
+            <h3 style="margin:0">MaximalBio — Biological & Plastic Cores</h3>
+            <p class="aicore-sub">Not one model but a lab of experimental brains: spiking cortex, fast-weight programmers, cross-layer plasticity, and continual Hebbian learning. Pick a model below — each has its own power and features.</p>
           </div>
-          <span class="aicore-badge experimental">EXPERIMENTAL</span>
+          <span class="aicore-badge experimental">LAB</span>
         </div>
 
-        <div class="aicore-power">
-          <div class="aicore-power-label">Power level <b>45</b><span>/100 · research core</span></div>
-          <div class="aicore-meter"><i style="width:45%"></i></div>
-          <div class="aicore-power-legend">Lower raw text quality than the transformers, but by far the most novel: it learns the way a cortex does, not the way a GPT does.</div>
-        </div>
+        <div class="callout info"><span class="ico">🧪</span><p>These four share one idea — <strong>weights that change while the network runs</strong> — taken to different extremes. All are char-level, CPU-clamped, and download separately.</p></div>
 
-        <div class="aicore-specs">
-          <div class="aicore-spec"><span>Type</span><b>Spiking Neural Net (SNN)</b></div>
-          <div class="aicore-spec"><span>Neurons</span><b>LIF · 2 × 192</b></div>
-          <div class="aicore-spec"><span>Learning</span><b>STDP + backprop</b></div>
-          <div class="aicore-spec"><span>Context</span><b>96 chars</b></div>
-          <div class="aicore-spec"><span>Plasticity</span><b>Dopamine-gated</b></div>
-          <div class="aicore-spec"><span>Delays</span><b>1–3 step axonal</b></div>
-        </div>
-
-        <h4 class="aicore-h">Core design — six mechanisms in every cortical layer</h4>
-        <div class="aicore-mech">
-          <div class="aicore-m"><b>1 · LIF neurons</b><p>Leaky integrate-and-fire membranes with a surrogate-gradient spike (sharp Heaviside forward, fast-sigmoid backward).</p></div>
-          <div class="aicore-m"><b>2 · STDP</b><p>Unsupervised pre/post spike-timing traces grow a local plastic weight matrix — LTP minus LTD.</p></div>
-          <div class="aicore-m"><b>3 · Homeostasis</b><p>Each neuron tracks its own firing rate and nudges its threshold toward a target frequency.</p></div>
-          <div class="aicore-m"><b>4 · Lateral inhibition</b><p>A spike now injects negative current into its neighbors next step — winner-take-all competition.</p></div>
-          <div class="aicore-m"><b>5 · Dopamine gating</b><p>A global reward scalar scales every STDP update; a sharp loss drop doubles plasticity.</p></div>
-          <div class="aicore-m"><b>6 · Axonal delays</b><p>Each neuron routes its spike 1–3 steps into the future through a delay buffer.</p></div>
-        </div>
-
-        <h4 class="aicore-h">How it's made</h4>
-        <ol class="wb-steps">
-          <li>Characters embed and add positional encodings, then flow through <strong>2 cortical layers</strong>, each a full simulation loop over the 96 time-steps.</li>
-          <li>At every step the layer integrates input, fires spikes against per-neuron homeostatic thresholds, resets, then applies inhibition, delays, STDP and dopamine — all <em>outside</em> the autograd graph.</li>
-          <li>Only the task synapses and readout are trained by <strong>AdamW backprop</strong>; the six bio-mechanisms self-organize locally.</li>
-          <li>The eval loop reports a real diagnostic — <strong>homeostatic threshold stability</strong> (vth std + mean rate per layer) alongside prediction loss.</li>
-        </ol>
-
-        ${code('python — surrogate-gradient spike', `<span class="tok-kw">class</span> <span class="tok-fn">SurrogateSpike</span>(torch.autograd.Function):
+        ${subtabs('aicorebio', [
+          /* ---- Spiking ---- */
+          { label: '⚡ Spiking (SNN)', body: `
+            <div class="aicore-head">
+              <div><h4 style="margin:0">KitlerNet-MaximalBio</h4>
+              <p class="aicore-sub">A biologically extreme spiking cortical network — six interacting brain mechanisms, no plain backprop MLP</p></div>
+              <span class="aicore-badge experimental">SNN</span>
+            </div>
+            <div class="aicore-power">
+              <div class="aicore-power-label">Power level <b>45</b><span>/100 · neuromorphic</span></div>
+              <div class="aicore-meter"><i style="width:45%"></i></div>
+              <div class="aicore-power-legend">Lowest raw text quality, highest biological realism — it learns the way a cortex does, not the way a GPT does.</div>
+            </div>
+            <div class="aicore-specs">
+              <div class="aicore-spec"><span>Type</span><b>Spiking Neural Net</b></div>
+              <div class="aicore-spec"><span>Neurons</span><b>LIF · 2 × 192</b></div>
+              <div class="aicore-spec"><span>Learning</span><b>STDP + backprop</b></div>
+              <div class="aicore-spec"><span>Context</span><b>96 chars</b></div>
+              <div class="aicore-spec"><span>Plasticity</span><b>Dopamine-gated</b></div>
+              <div class="aicore-spec"><span>Delays</span><b>1–3 step axonal</b></div>
+            </div>
+            <h4 class="aicore-h">Features — six mechanisms per cortical layer</h4>
+            <div class="aicore-mech">
+              <div class="aicore-m"><b>1 · LIF neurons</b><p>Leaky integrate-and-fire membranes with a surrogate-gradient spike (Heaviside forward, fast-sigmoid backward).</p></div>
+              <div class="aicore-m"><b>2 · STDP</b><p>Unsupervised pre/post spike-timing traces grow a local plastic weight matrix — LTP minus LTD.</p></div>
+              <div class="aicore-m"><b>3 · Homeostasis</b><p>Each neuron tracks its firing rate and nudges its own threshold toward a target frequency.</p></div>
+              <div class="aicore-m"><b>4 · Lateral inhibition</b><p>A spike injects negative current into neighbors next step — winner-take-all competition.</p></div>
+              <div class="aicore-m"><b>5 · Dopamine gating</b><p>A global reward scalar scales every STDP update; a sharp loss drop doubles plasticity.</p></div>
+              <div class="aicore-m"><b>6 · Axonal delays</b><p>Each neuron routes its spike 1–3 steps into the future through a delay buffer.</p></div>
+            </div>
+            <h4 class="aicore-h">How it's made</h4>
+            <ol class="wb-steps">
+              <li>Chars embed + position, then flow through <strong>2 cortical layers</strong>, each a full simulation loop over 96 time-steps.</li>
+              <li>Every step integrates input, fires against homeostatic thresholds, resets, then applies inhibition, delays, STDP and dopamine — all <em>outside</em> autograd.</li>
+              <li>Only task synapses + readout train via <strong>AdamW</strong>; the six bio-mechanisms self-organize locally.</li>
+              <li>Eval reports <strong>homeostatic threshold stability</strong> (vth std + mean rate per layer) alongside loss.</li>
+            </ol>
+            ${code('python — surrogate-gradient spike', `<span class="tok-kw">class</span> <span class="tok-fn">SurrogateSpike</span>(torch.autograd.Function):
     <span class="tok-kw">def</span> <span class="tok-fn">forward</span>(ctx, v):
         <span class="tok-kw">return</span> (v > <span class="tok-num">0</span>).float()                 <span class="tok-com"># sharp Heaviside</span>
     <span class="tok-kw">def</span> <span class="tok-fn">backward</span>(ctx, g):
         <span class="tok-kw">return</span> g * (<span class="tok-num">1</span> / (<span class="tok-num">10</span>*v.abs() + <span class="tok-num">1</span>)**<span class="tok-num">2</span>)  <span class="tok-com"># fast-sigmoid</span>`)}
+            <a class="aicore-dl" href="assets/cores/kitlernet_maximalbio.py" download>⬇ Download kitlernet_maximalbio.py</a>
+          ` },
 
-        <a class="aicore-dl" href="assets/cores/kitlernet_maximalbio.py" download>⬇ Download kitlernet_maximalbio.py</a>
+          /* ---- FWP ---- */
+          { label: '🧩 FWP', body: `
+            <div class="aicore-head">
+              <div><h4 style="margin:0">KitlerNet-FWP</h4>
+              <p class="aicore-sub">Fast Weight Programmer — the hidden state writes its own low-rank delta-weights every token (Schmidhuber '92 / Schlag '21)</p></div>
+              <span class="aicore-badge original">BASE</span>
+            </div>
+            <div class="aicore-power">
+              <div class="aicore-power-label">Power level <b>60</b><span>/100 · foundation</span></div>
+              <div class="aicore-meter"><i style="width:60%"></i></div>
+              <div class="aicore-power-legend">The clean, fully-differentiable fast-weight core the other two plastic models build on. Transformer attention + one dynamic FFN layer.</div>
+            </div>
+            <div class="aicore-specs">
+              <div class="aicore-spec"><span>Type</span><b>Fast-weight transformer</b></div>
+              <div class="aicore-spec"><span>Size</span><b>4 × 256-dim</b></div>
+              <div class="aicore-spec"><span>Fast weight</span><b>Rank-4 outer product</b></div>
+              <div class="aicore-spec"><span>Attention</span><b>4-head SDPA</b></div>
+              <div class="aicore-spec"><span>Context</span><b>128 chars</b></div>
+              <div class="aicore-spec"><span>Params</span><b>≈ 4M</b></div>
+            </div>
+            <h4 class="aicore-h">Features</h4>
+            <ul>
+              <li><strong>Per-token dynamic weights</strong> — the FFN's first projection is <code class="inline-code">W0 + a·bᵀ</code>, where a and b are generated from the token itself.</li>
+              <li><strong>Memory-tractable</strong> — the delta never materializes a full d×d matrix; two einsums keep it CPU-feasible.</li>
+              <li><strong>Fully differentiable</strong> end-to-end — no local rules, just backprop through the hypernetwork.</li>
+            </ul>
+            <h4 class="aicore-h">How it's made</h4>
+            <div class="aicore-flow"><span>x</span><em>→</em><span class="hl">W0·x</span><em>+</em><span class="hl">(x·b)·a</span><em>→</em><span>y</span></div>
+            <p>Standard RMSNorm + SDPA attention block, then a fast-weight GELU FFN. The generators <code class="inline-code">gen_a</code> / <code class="inline-code">gen_b</code> map the hidden state to the two rank-4 vectors that modulate the projection.</p>
+            ${code('python — the fast-weight linear', `<span class="tok-kw">def</span> <span class="tok-fn">forward</span>(self, x):
+    base  = self.W0(x)                              <span class="tok-com"># static weight</span>
+    a = self.gen_a(x).view(B,T,rank,D)
+    b = self.gen_b(x).view(B,T,rank,D)
+    coeff = torch.einsum(<span class="tok-str">"btd,btrd->btr"</span>, x, b)   <span class="tok-com"># x · b</span>
+    fast  = torch.einsum(<span class="tok-str">"btr,btrd->btd"</span>, coeff, a) <span class="tok-com"># (x·b)·a</span>
+    <span class="tok-kw">return</span> base + self.scale*fast`)}
+            <a class="aicore-dl" href="assets/cores/kitlernet_fwp.py" download>⬇ Download kitlernet_fwp.py</a>
+          ` },
+
+          /* ---- SCLP ---- */
+          { label: '🔀 SCLP', body: `
+            <div class="aicore-head">
+              <div><h4 style="margin:0">KitlerNet-SCLP</h4>
+              <p class="aicore-sub">Sequential Cross-Layer Plasticity — every projection is a fast-weight layer, modulated by feedback from the layers above and below</p></div>
+              <span class="aicore-badge flagship">ENTANGLED</span>
+            </div>
+            <div class="aicore-power">
+              <div class="aicore-power-label">Power level <b>66</b><span>/100 · cross-wired</span></div>
+              <div class="aicore-meter"><i style="width:66%"></i></div>
+              <div class="aicore-power-legend">FWP taken everywhere (Q,K,V,O + both FFN matrices) and wired vertically between layers — bidirectional influence that stays a strict DAG per step.</div>
+            </div>
+            <div class="aicore-specs">
+              <div class="aicore-spec"><span>Type</span><b>Cross-layer fast-weight</b></div>
+              <div class="aicore-spec"><span>Size</span><b>4 × 256-dim</b></div>
+              <div class="aicore-spec"><span>Fast weight</span><b>6 per block</b></div>
+              <div class="aicore-spec"><span>Feedback</span><b>N−1 now + N+1 delayed</b></div>
+              <div class="aicore-spec"><span>Reg.</span><b>z-loss · 0.3 decay</b></div>
+              <div class="aicore-spec"><span>Params</span><b>≈ 15M</b></div>
+            </div>
+            <h4 class="aicore-h">Features</h4>
+            <ul>
+              <li><strong>Fast weights everywhere</strong> — all attention projections <em>and</em> both FFN matrices are dynamically modulated, not just one FFN layer.</li>
+              <li><strong>Cross-layer feedback</strong> — each layer's modulation is conditioned on layer N−1's current output and layer N+1's <em>previous-step</em> output.</li>
+              <li><strong>Deadlock-free</strong> — the delayed N+1 wire keeps the whole thing a valid DAG within a step while still feeling bidirectional.</li>
+              <li><strong>Hardened</strong> — z-loss + label smoothing + isolated 0.3 weight decay.</li>
+            </ul>
+            <h4 class="aicore-h">How it's made</h4>
+            <div class="aicore-flow"><span>fb: N−1 now</span><em>+</em><span>N+1 delayed</span><em>→</em><span class="hl">fuse → mod</span><em>→</em><span>drives every fast weight</span></div>
+            ${code('python — cross-layer modulation', `mod = self.fuse(torch.cat([fb_prev_layer, fb_next_delayed], -<span class="tok-num">1</span>))
+q = self.q(h, mod); k = self.k(h, mod); v = self.v(h, mod)  <span class="tok-com"># all fast-weight</span>
+<span class="tok-com"># fb_prev = layer N-1 this step · fb_next = layer N+1 last step</span>`)}
+            <a class="aicore-dl" href="assets/cores/kitlernet_sclp.py" download>⬇ Download kitlernet_sclp.py</a>
+          ` },
+
+          /* ---- CHH ---- */
+          { label: '♾️ CHH', body: `
+            <div class="aicore-head">
+              <div><h4 style="margin:0">KitlerNet-CHH</h4>
+              <p class="aicore-sub">Continuous Hebbian Hybrid — persistent Hebbian memory traces carried across token-steps, plus a local predictive-coding loss</p></div>
+              <span class="aicore-badge flagship">CONTINUAL</span>
+            </div>
+            <div class="aicore-power">
+              <div class="aicore-power-label">Power level <b>68</b><span>/100 · self-adapting</span></div>
+              <div class="aicore-meter"><i style="width:68%"></i></div>
+              <div class="aicore-power-legend">The most capable plastic core: memory that persists across steps and keeps adapting <em>during generation</em>, guided by per-block predictive coding.</div>
+            </div>
+            <div class="aicore-specs">
+              <div class="aicore-spec"><span>Type</span><b>Hebbian fast-weight</b></div>
+              <div class="aicore-spec"><span>Size</span><b>4 × 256-dim</b></div>
+              <div class="aicore-spec"><span>Memory</span><b>Persistent trace M</b></div>
+              <div class="aicore-spec"><span>Decay λ</span><b>0.9</b></div>
+              <div class="aicore-spec"><span>Aux loss</span><b>Local predictive coding</b></div>
+              <div class="aicore-spec"><span>Params</span><b>≈ 15M</b></div>
+            </div>
+            <h4 class="aicore-h">Features</h4>
+            <ul>
+              <li><strong>Persistent Hebbian traces</strong> — each fast-weight layer carries a memory <code class="inline-code">M ← λ·M + a⊗b</code> across token-steps, differentiable within a step.</li>
+              <li><strong>Local predictive coding</strong> — every block predicts the next block's input; the summed error is added to the global loss.</li>
+              <li><strong>Live streaming adaptation</strong> — during generation the traces keep updating per token, so the model tunes to the context as it reads.</li>
+              <li><strong>Hardened</strong> — z-loss + label smoothing + isolated 0.3 weight decay.</li>
+            </ul>
+            <h4 class="aicore-h">How it's made</h4>
+            <div class="aicore-flow"><span>a⊗b this step</span><em>→</em><span class="hl">M = λM + a⊗b</span><em>→</em><span>x·M = fast term</span><em>→</em><span>carry M forward</span></div>
+            ${code('python — the persistent trace', `hebb = torch.einsum(<span class="tok-str">"btrd,btre->bde"</span>, a, b) / (T*rank)
+M = HEBB_LAMBDA * self.M + hebb        <span class="tok-com"># accumulate across steps</span>
+self.M = M.detach()                    <span class="tok-com"># carry forward, cut graph</span>
+fast = torch.einsum(<span class="tok-str">"btd,bde->bte"</span>, x, M)  <span class="tok-com"># apply memory</span>`)}
+            <a class="aicore-dl" href="assets/cores/kitlernet_chh.py" download>⬇ Download kitlernet_chh.py</a>
+          ` },
+        ])}
       ` },
     ])}
 
@@ -791,7 +917,11 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
           <tr><td><b>v1x</b></td><td>Transformer + MoE</td><td>≈110M</td><td>70</td><td>Biggest raw capacity, original prototype</td></tr>
           <tr><td><b>v2x</b></td><td>Transformer</td><td>≈20M</td><td>78</td><td>Fast, clean baseline text generation</td></tr>
           <tr><td><b>v3x</b></td><td>Regularized transformer</td><td>≈20M</td><td>88</td><td>Long runs without overfitting</td></tr>
-          <tr><td><b>MaximalBio</b></td><td>Spiking neural net</td><td>~1M</td><td>45</td><td>Neuromorphic / biological research</td></tr>
+          <tr class="aicore-grouprow"><td colspan="5">🧬 MaximalBio — Bio Lab</td></tr>
+          <tr><td><b>· Spiking</b></td><td>Spiking neural net</td><td>~1M</td><td>45</td><td>Neuromorphic / biological research</td></tr>
+          <tr><td><b>· FWP</b></td><td>Fast-weight transformer</td><td>≈4M</td><td>60</td><td>Clean per-token dynamic weights</td></tr>
+          <tr><td><b>· SCLP</b></td><td>Cross-layer fast-weight</td><td>≈15M</td><td>66</td><td>Vertically entangled plasticity</td></tr>
+          <tr><td><b>· CHH</b></td><td>Hebbian fast-weight</td><td>≈15M</td><td>68</td><td>Continual, self-adapting memory</td></tr>
         </tbody>
       </table>
     </div>
