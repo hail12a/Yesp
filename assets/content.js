@@ -570,6 +570,62 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
     <div class="callout info"><span class="ico">🧠</span><p>Every core trains on <b>Tiny Shakespeare</b>, clamps to <b>4 CPU threads</b>, and checkpoints so you can <kbd>Ctrl+C</kbd> and resume. Download a core, drop it in your home folder, and run <code class="inline-code">python3 core.py</code>.</p></div>
 
     ${tabs('aicore', [
+      /* ============ v1x ============ */
+      { label: '🚀 v1x — Original MoE', body: `
+        <div class="aicore-head">
+          <div>
+            <h3 style="margin:0">KitlerNet v1x</h3>
+            <p class="aicore-sub">The first core — a big 2025-stack GPT with a Mixture-of-Experts feed-forward, CPU edition</p>
+          </div>
+          <span class="aicore-badge original">ORIGINAL</span>
+        </div>
+
+        <div class="aicore-power">
+          <div class="aicore-power-label">Power level <b>70</b><span>/100 · biggest raw capacity</span></div>
+          <div class="aicore-meter"><i style="width:70%"></i></div>
+          <div class="aicore-power-legend">The most parameters of the family thanks to MoE, but char-level and un-fused — bold and heavy rather than efficient. The prototype the later cores were refined from.</div>
+        </div>
+
+        <div class="aicore-specs">
+          <div class="aicore-spec"><span>Type</span><b>Transformer + MoE</b></div>
+          <div class="aicore-spec"><span>Parameters</span><b>≈ 110M (top-2 active)</b></div>
+          <div class="aicore-spec"><span>Layers</span><b>12 × 512-dim</b></div>
+          <div class="aicore-spec"><span>Experts</span><b>4 · route top-2</b></div>
+          <div class="aicore-spec"><span>Attention</span><b>GQA · 8 Q / 2 KV heads</b></div>
+          <div class="aicore-spec"><span>Tokenizer</span><b>Char-level</b></div>
+        </div>
+
+        <h4 class="aicore-h">Core design — go big, add experts</h4>
+        <p>v1x already runs the full modern stack (RMSNorm + RoPE + GQA + SwiGLU) but swaps the plain feed-forward for a <strong>Mixture of Experts</strong>: four SwiGLU experts with a learned router that fires only the top-2 per token, so capacity scales without every weight running every step.</p>
+        <div class="aicore-flow">
+          <span>chars</span><em>→</em><span>embed</span><em>→</em><span class="hl">12× Block</span><em>→</em><span>RMSNorm</span><em>→</em><span>tied&nbsp;head</span>
+        </div>
+        <div class="aicore-flow sub">
+          <span>Block =</span><span>RMSNorm</span><em>→</em><span class="hl">GQA + RoPE</span><em>→</em><span>+residual</span><em>→</em><span>RMSNorm</span><em>→</em><span class="hl">MoE (4×SwiGLU)</span><em>→</em><span>+residual</span>
+        </div>
+
+        <h4 class="aicore-h">How it's made</h4>
+        <ol class="wb-steps">
+          <li><strong>Mixture of Experts:</strong> a router scores 4 SwiGLU experts per token, softmaxes the top-2, and blends only those — big model, sparse compute.</li>
+          <li><strong>GQA</strong> with 8 query heads sharing 2 KV heads (4× less attention memory), RoPE rotary positions, causal-masked manual attention.</li>
+          <li><strong>Weight tying</strong> between token embedding and output head; RMSNorm throughout.</li>
+          <li><strong>Training:</strong> AdamW, warmup + linear decay LR, grad-accum ×4, grad-clip 1.0, best-val checkpoint + auto-resume.</li>
+          <li><strong>CPU edition:</strong> 8 threads, oneDNN — no <code class="inline-code">torch.compile</code> and no BPE yet, which is exactly what v2x fixed for speed.</li>
+        </ol>
+
+        ${code('python — the MoE router', `<span class="tok-kw">def</span> <span class="tok-fn">forward</span>(self, x):
+    logits = self.router(flat)
+    weights, idx = torch.topk(logits, <span class="tok-num">2</span>, dim=-<span class="tok-num">1</span>)   <span class="tok-com"># top-2 experts</span>
+    weights = F.softmax(weights, dim=-<span class="tok-num">1</span>)
+    <span class="tok-kw">for</span> e, expert <span class="tok-kw">in</span> <span class="tok-fn">enumerate</span>(self.experts):
+        mask = (idx == e).any(dim=-<span class="tok-num">1</span>)          <span class="tok-com"># route tokens</span>
+        out[mask] += expert(flat[mask]) * w`)}
+
+        <div class="callout tip"><span class="ico">🚀</span><p><strong>Lineage:</strong> v1x proved the stack works. v2x traded MoE + char-level for BPE + <code class="inline-code">torch.compile</code> to run far faster per token; v3x then hardened it against overfitting.</p></div>
+
+        <a class="aicore-dl" href="assets/cores/kitlernet_v1x.py" download>⬇ Download kitlernet_v1x.py</a>
+      ` },
+
       /* ============ v2x ============ */
       { label: '⚙️ v2x — Transformer', body: `
         <div class="aicore-head">
@@ -732,6 +788,7 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
       <table class="aicore-table">
         <thead><tr><th>Core</th><th>Paradigm</th><th>Params</th><th>Power</th><th>Best for</th></tr></thead>
         <tbody>
+          <tr><td><b>v1x</b></td><td>Transformer + MoE</td><td>≈110M</td><td>70</td><td>Biggest raw capacity, original prototype</td></tr>
           <tr><td><b>v2x</b></td><td>Transformer</td><td>≈20M</td><td>78</td><td>Fast, clean baseline text generation</td></tr>
           <tr><td><b>v3x</b></td><td>Regularized transformer</td><td>≈20M</td><td>88</td><td>Long runs without overfitting</td></tr>
           <tr><td><b>MaximalBio</b></td><td>Spiking neural net</td><td>~1M</td><td>45</td><td>Neuromorphic / biological research</td></tr>

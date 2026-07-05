@@ -1476,11 +1476,13 @@ body.cpu-fullscreen #cpu-app {
   flex-shrink: 0; padding: 4px 11px; border-radius: 20px;
   font-size: 11px; font-weight: 800; letter-spacing: .06em;
 }
+.aicore-badge.original     { background: #dbeafe; color: #1e5aa8; }
 .aicore-badge.stable       { background: #d4edda; color: #1a7a3b; }
 .aicore-badge.flagship     { background: var(--accent-soft); color: var(--accent-ink); }
 .aicore-badge.experimental { background: #e7defb; color: #5a3aa0; }
 [data-theme="dark"] .aicore-badge.stable       { background: #1a3d2a; color: #5fd98f; }
 [data-theme="dark"] .aicore-badge.experimental { background: #2a1f45; color: #b79cf0; }
+[data-theme="dark"] .aicore-badge.original     { background: #16294a; color: #7fb0f0; }
 
 /* power meter */
 .aicore-power { margin: 18px 0 22px; }
