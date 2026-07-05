@@ -1477,6 +1477,8 @@ body.cpu-fullscreen #cpu-app {
   font-size: 11px; font-weight: 800; letter-spacing: .06em;
 }
 .aicore-badge.original     { background: #dbeafe; color: #1e5aa8; }
+.aicore-badge.new          { background: #d7f5e3; color: #12824a; }
+[data-theme="dark"] .aicore-badge.new          { background: #123a26; color: #58d996; }
 .aicore-badge.stable       { background: #d4edda; color: #1a7a3b; }
 .aicore-badge.flagship     { background: var(--accent-soft); color: var(--accent-ink); }
 .aicore-badge.experimental { background: #e7defb; color: #5a3aa0; }

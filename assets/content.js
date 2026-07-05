@@ -59,6 +59,46 @@ const powerMeter = (power) => {
 const AI_CORES = [
   /* ---------------- MAIN CORES ---------------- */
   {
+    id: 'hgem', cat: 'main', route: '/ai/hgem', emoji: '🧠',
+    name: 'HybridBrain-6F++', tagline: 'Hybrid Cognitive Engine', badge: 'NEW', badgeClass: 'new',
+    power: 82, file: 'assets/cores/hybridbrain_6fpp.py', fileName: 'hybridbrain_6fpp.py',
+    blurb: 'The newest core — a hardened cognitive engine that fuses a transformer with fast weights, sparse Hebbian memory, a grounded world model, a persistent identity and a narrative head.',
+    specs: [
+      { k: 'Type', v: 'Hybrid cognitive engine' }, { k: 'Params', v: '≈ 12M' },
+      { k: 'Backbone', v: '4 × 256-dim' }, { k: 'Per-block memory', v: 'Gated FW + sparse Hebbian' },
+      { k: 'Attention', v: '4-head, head-gated' }, { k: 'Extras', v: 'World model · qualia · identity · narrative' },
+    ],
+    designHTML: `
+      <h2 id="design" class="aicore-h">Core design — seven subsystems, one stabilized brain</h2>
+      <p>HybridBrain runs a normal pre-norm transformer backbone, then layers a stack of cognitive modules on top and blends their signals into the final logits — all heavily hardened against the instability these extra loops usually cause.</p>
+      <div class="aicore-mech">
+        <div class="aicore-m"><b>1 · Gated fast weights</b><p>Each block's FFN is a low-rank <code class="inline-code">W0 + a·bᵀ</code> whose contribution is sigmoid-gated per rank and scaled by 1/√d to stop it exploding.</p></div>
+        <div class="aicore-m"><b>2 · Sparse Hebbian memory</b><p>A persistent trace <code class="inline-code">M ← λM + a⊗b</code> per block, top-k sparsified and RMSNorm-controlled, carried across steps.</p></div>
+        <div class="aicore-m"><b>3 · Head-gated attention</b><p>Standard causal SDPA, but every head has a bounded sigmoid gate so the model can learn to silence heads.</p></div>
+        <div class="aicore-m"><b>4 · Contrastive world model</b><p>Object and property MLPs with a cosine grounding loss that pulls matching object↔property pairs together and pushes mismatches apart.</p></div>
+        <div class="aicore-m"><b>5 · Qualia map</b><p>A tanh "feel space" projection of the hidden state into a 128-d bounded qualia vector.</p></div>
+        <div class="aicore-m"><b>6 · Identity controller</b><p>A normalized, persistent <code class="inline-code">self_state</code> + goal bank that biases the logits and is saved to disk between runs.</p></div>
+        <div class="aicore-m"><b>7 · Narrative head</b><p>A deep head conditioned on the hidden state and the identity vector, mixed in at low weight.</p></div>
+      </div>`,
+    howHTML: `
+      <h2 id="how" class="aicore-h">How it's made — blend, then bias, then harden</h2>
+      <ol class="wb-steps">
+        <li><strong>Backbone:</strong> embed + positional, then 4 blocks of <em>norm → head-gated attention → norm → (gated fast-weight + sparse Hebbian) → projection</em>.</li>
+        <li><strong>Cognitive heads:</strong> the final hidden state feeds the world model (grounding loss), the identity controller (bias logits) and the narrative head.</li>
+        <li><strong>Blend:</strong> <code class="inline-code">logits = base + 0.1·bias + 0.05·narrative</code> — the base vocabulary stays in control while the extra systems nudge syntax.</li>
+        <li><strong>Persistent identity:</strong> <code class="inline-code">self_state</code> is normalized each step, EMA-updated from the hidden mean, and anchored to <code class="inline-code">~/hybrid_identity.pt</code> so the model keeps its "self" across runs.</li>
+        <li><strong>Hardening:</strong> RMSNorm everywhere, clamped grounding loss, 1/√d scaling on fast paths, and grad-clip 0.5 keep the whole system stable.</li>
+      </ol>`,
+    codeLang: 'python — the hybrid block',
+    code: `<span class="tok-kw">for</span> b <span class="tok-kw">in</span> self.blocks:
+    h1 = b[<span class="tok-str">"norm1"</span>](x)
+    x  = x + b[<span class="tok-str">"drop"</span>](b[<span class="tok-str">"att"</span>](h1))          <span class="tok-com"># head-gated attention</span>
+    h2 = b[<span class="tok-str">"norm2"</span>](x)
+    h  = b[<span class="tok-str">"act"</span>](b[<span class="tok-str">"fw"</span>](h2) + b[<span class="tok-str">"hebb"</span>](h2))  <span class="tok-com"># fast weight + Hebbian</span>
+    x  = x + b[<span class="tok-str">"drop"</span>](b[<span class="tok-str">"proj"</span>](h))
+<span class="tok-com"># logits = base + 0.1*identity_bias + 0.05*narrative</span>`,
+  },
+  {
     id: 'v1x', cat: 'main', route: '/ai/v1x', emoji: '🚀',
     name: 'KitlerNet v1x', tagline: 'Original MoE', badge: 'ORIGINAL', badgeClass: 'original',
     power: 42, file: 'assets/cores/kitlernet_v1x.py', fileName: 'kitlernet_v1x.py',
