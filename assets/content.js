@@ -59,10 +59,90 @@ const powerMeter = (power) => {
 const AI_CORES = [
   /* ---------------- MAIN CORES ---------------- */
   {
-    id: 'hgem', cat: 'main', route: '/ai/hgem', emoji: '🧠',
-    name: 'HybridBrain-6F++', tagline: 'Hybrid Cognitive Engine', badge: 'NEW', badgeClass: 'new',
+    id: 'hgem2', cat: 'variant', route: '/ai/hgem2', emoji: '🌌',
+    variantLabel: 'GPU', variantEmoji: '⚡', variantNote: 'CUDA / T4 · V2.2',
+    name: 'KitlerNet V2.2 — HGEM2', tagline: 'Data-Center HybridBrain', badge: 'GPU', badgeClass: 'new',
+    power: 90, file: 'assets/cores/kitlernet_v2_2_hgem2.py', fileName: 'kitlernet_v2_2_hgem2.py',
+    blurb: 'HybridBrain scaled to data-center size and trained on GPU with mixed precision, torch.compile and a cosine schedule. The same seven-subsystem brain, much bigger and much harder.',
+    specs: [
+      { k: 'Type', v: 'Hybrid cognitive engine (scaled)' }, { k: 'Params', v: '≈ 150M' },
+      { k: 'Backbone', v: '8 × 512-dim · 8 heads' }, { k: 'Context', v: '256 tokens' },
+      { k: 'Device', v: 'CUDA (T4) · CPU fallback' }, { k: 'Precision', v: 'AMP fp16 + GradScaler' },
+    ],
+    designHTML: `
+      <h2 id="design" class="aicore-h">Core design — HybridBrain, scaled to the data center</h2>
+      <p>HGEM2 keeps the exact seven-subsystem <a class="inline" href="#/ai/hgem" data-link>HybridBrain-6F++</a> stack — head-gated attention, gated fast weights, sparse Hebbian memory, a contrastive world model, a qualia map, a persistent identity controller and a narrative head — but roughly doubles every dimension and moves training onto the GPU.</p>
+      <div class="aicore-mech">
+        <div class="aicore-m"><b>▲ Upscaled backbone</b><p>512-dim / 8 layers / 8 heads / rank-8 fast weights and a 256-token context — a big step up from the CPU model's 256-dim / 4-layer core.</p></div>
+        <div class="aicore-m"><b>⚡ GPU training path</b><p><code class="inline-code">torch.compile</code> + AMP fp16 autocast + <code class="inline-code">GradScaler</code> for ~1.3–1.5× throughput on a T4, with a clean CPU fallback.</p></div>
+        <div class="aicore-m"><b>📉 Cosine schedule</b><p>200-step LR warmup then cosine decay to 10% — the biggest "learns faster" win over the flat-LR CPU version.</p></div>
+        <div class="aicore-m"><b>🛡️ Deeper hardening</b><p>Generators down-scaled ×0.05, coefficients clamped ±8, Hebbian traces clamped ±1.5, tiny 0.008 init, weight decay 0.15, and NaN guards that halt cleanly.</p></div>
+        <div class="aicore-m"><b>🔁 Repetition brake</b><p>Generation dampens the logits of the last 8 tokens by 0.5 to break localized character loops.</p></div>
+        <div class="aicore-m"><b>💾 Full checkpointing</b><p>Saves model + tokenizer to <code class="inline-code">hgem_full.pth</code> and anchors the identity vector to disk between runs.</p></div>
+      </div>`,
+    howHTML: `
+      <h2 id="how" class="aicore-h">How it's made — same brain, bigger &amp; safer</h2>
+      <ol class="wb-steps">
+        <li><strong>Backbone:</strong> embed + positional, then 8 blocks of <em>norm → head-gated attention → norm → (gated fast-weight + sparse Hebbian) → projection</em>.</li>
+        <li><strong>Cognitive heads:</strong> the world model, identity controller and narrative head read the final hidden state; logits blend as <code class="inline-code">base + 0.1·bias + 0.05·narrative</code>.</li>
+        <li><strong>Mixed precision:</strong> forward/backward run under fp16 autocast; a <code class="inline-code">GradScaler</code> scales the loss, unscales before grad-clip 1.0, then steps.</li>
+        <li><strong>Schedule:</strong> per-step LR = warmup ramp then cosine decay, driving faster, smoother convergence.</li>
+        <li><strong>Safety:</strong> NaN detection breaks the loop, clamped generators/traces keep the extra memory systems bounded, and identity + checkpoint are saved on finish or Ctrl+C.</li>
+      </ol>`,
+    codeLang: 'python — mixed-precision training step',
+    code: `<span class="tok-kw">with</span> torch.amp.autocast(<span class="tok-str">"cuda"</span>, dtype=torch.float16, enabled=cuda):
+    logits, loss, aux = model(xb, yb)
+<span class="tok-kw">if</span> torch.isnan(loss): <span class="tok-kw">break</span>              <span class="tok-com"># NaN guard</span>
+scaler.scale(loss).backward()
+scaler.unscale_(optim)
+torch.nn.utils.clip_grad_norm_(model.parameters(), <span class="tok-num">1.0</span>)
+scaler.step(optim); scaler.update()`,
+  },
+  {
+    id: 'hgem2tpu', cat: 'variant', route: '/ai/hgem2-tpu', emoji: '🔷',
+    variantLabel: 'TPU', variantEmoji: '🔷', variantNote: 'TPU exclusive · XLA', variantNew: true,
+    name: 'KitlerNet V2.2 — HGEM2 (TPU)', tagline: 'TPU-Exclusive HybridBrain', badge: 'TPU ONLY', badgeClass: 'new',
+    power: 92, file: 'assets/cores/kitlernet_v2_2_hgem2_tpu.py', fileName: 'kitlernet_v2_2_hgem2_tpu.py',
+    blurb: 'The smartest build — the same 512-dim HybridBrain rebuilt for XLA/TPU, trained longer on real dialogue with ramped auxiliary objectives. TPU exclusive.',
+    specs: [
+      { k: 'Type', v: 'Hybrid cognitive engine (TPU)' }, { k: 'Params', v: '≈ 150M' },
+      { k: 'Backbone', v: '8 × 512-dim · 8 heads' }, { k: 'Device', v: 'TPU / XLA · bf16' },
+      { k: 'Training', v: '10k iters · aux ramp' }, { k: 'Data', v: 'TinyShakespeare + DailyDialog' },
+    ],
+    designHTML: `
+      <h2 id="design" class="aicore-h">Core design — HybridBrain, rebuilt for the TPU</h2>
+      <p>Same seven-subsystem <a class="inline" href="#/ai/hgem" data-link>HybridBrain</a> brain as the GPU build, but every dynamic operation was made <strong>XLA-safe</strong> so it compiles into a single static TPU graph — then trained longer, on real conversations, with the extra objectives eased in gradually.</p>
+      <div class="aicore-mech">
+        <div class="aicore-m"><b>🔷 XLA-static graph</b><p>No in-forward buffer registration and fixed, pre-allocated state shapes so the whole model traces cleanly on TPU.</p></div>
+        <div class="aicore-m"><b>📊 Quantile sparsity</b><p>The Hebbian memory's dynamic top-k mask is replaced by a static quantile threshold — same sparsity, TPU-friendly.</p></div>
+        <div class="aicore-m"><b>🎚️ Ramped aux losses</b><p>Controller, narrative and grounding objectives ramp 0→1 over 1500 steps so the model learns clean language first.</p></div>
+        <div class="aicore-m"><b>💬 Real dialogue data</b><p>Trains on TinyShakespeare + two DailyDialog shards, so it sees actual User/Bot conversations, not just character grids.</p></div>
+        <div class="aicore-m"><b>⚙️ bf16 + sync barriers</b><p>bf16 downcast and one <code class="inline-code">torch_xla.sync()</code> barrier per optimizer step for stable, fast TPU throughput.</p></div>
+        <div class="aicore-m"><b>🔁 Stronger repetition brake</b><p>Generation penalizes the last 32 tokens by 1.5 to keep long dialogue samples from looping.</p></div>
+      </div>`,
+    howHTML: `
+      <h2 id="how" class="aicore-h">How it's made — same brain, TPU-native</h2>
+      <ol class="wb-steps">
+        <li><strong>Device:</strong> initializes a <code class="inline-code">torch_xla</code> TPU device, with a clean CUDA/CPU fallback if XLA isn't present.</li>
+        <li><strong>Static memory:</strong> the Hebbian trace is a pre-registered buffer updated by plain assignment — no dynamic re-registration that would break the graph.</li>
+        <li><strong>Aux schedule:</strong> <code class="inline-code">_aux_scale = min(1, it/1500)</code> multiplies the controller/narrative/grounding weights so they fade in.</li>
+        <li><strong>Optimizer step:</strong> <code class="inline-code">xm.optimizer_step(optim, barrier=True)</code> on TPU, plain <code class="inline-code">optim.step()</code> elsewhere; cosine LR with warmup to a floor.</li>
+        <li><strong>Checkpointing:</strong> saves model + vocab + identity via <code class="inline-code">xm.save</code>, and prints live text samples so coherence is read, not just the loss.</li>
+      </ol>`,
+    codeLang: 'python — XLA-safe TPU step',
+    code: `_aux_scale = <span class="tok-fn">min</span>(<span class="tok-num">1.0</span>, it / AUX_WARMUP)   <span class="tok-com"># ramp aux objectives in</span>
+logits, loss, aux = model(xb, yb)
+loss.backward()
+torch.nn.utils.clip_grad_norm_(model.parameters(), <span class="tok-num">1.0</span>)
+<span class="tok-kw">if</span> IS_XLA: xm.optimizer_step(optim, barrier=<span class="tok-kw">True</span>)  <span class="tok-com"># single TPU barrier</span>
+<span class="tok-kw">else</span>:      optim.step()`,
+  },
+  {
+    id: 'hgem', cat: 'variant', route: '/ai/hgem', emoji: '🧠',
+    variantLabel: 'CPU', variantEmoji: '💻', variantNote: 'CPU · original HybridBrain-6F++',
+    name: 'HybridBrain-6F++', tagline: 'Hybrid Cognitive Engine', badge: 'CPU', badgeClass: 'flagship',
     power: 82, file: 'assets/cores/hybridbrain_6fpp.py', fileName: 'hybridbrain_6fpp.py',
-    blurb: 'The newest core — a hardened cognitive engine that fuses a transformer with fast weights, sparse Hebbian memory, a grounded world model, a persistent identity and a narrative head.',
+    blurb: 'The original CPU cognitive engine that fuses a transformer with fast weights, sparse Hebbian memory, a grounded world model, a persistent identity and a narrative head.',
     specs: [
       { k: 'Type', v: 'Hybrid cognitive engine' }, { k: 'Params', v: '≈ 12M' },
       { k: 'Backbone', v: '4 × 256-dim' }, { k: 'Per-block memory', v: 'Gated FW + sparse Hebbian' },
@@ -330,6 +410,48 @@ const coreListRow = (c) => `
     </div>
     <span class="ailist-arrow">›</span>
   </a>`;
+
+/* a core that ships in multiple builds — one list row that drops down to its variants */
+const coreById = (id) => AI_CORES.find(c => c.id === id);
+
+const HGEM_GROUP = {
+  emoji: '🧠', name: 'HGEM · HybridBrain', tagline: 'Cognitive Engine',
+  bubble: '3 BUILDS',
+  blurb: 'A cognitive engine with fast weights, Hebbian memory, a grounded world model, a persistent identity and a narrative head — shipping in three builds. Click to choose CPU, GPU or TPU.',
+  variantIds: ['hgem2tpu', 'hgem2', 'hgem'],
+};
+
+const renderGroupRow = (g) => {
+  const vs = g.variantIds.map(coreById).filter(Boolean);
+  const top = Math.max(...vs.map(v => v.power));
+  return `
+  <div class="ailist-groupwrap">
+    <div class="ailist-row ailist-group" data-group-toggle role="button" tabindex="0" aria-expanded="false">
+      <span class="ailist-bubble">◆ ${g.bubble}</span>
+      <div class="ailist-emoji">${g.emoji}</div>
+      <div class="ailist-main">
+        <div class="ailist-name">${g.name}<span class="ailist-tag">${g.tagline}</span></div>
+        <div class="ailist-sub">${g.blurb}</div>
+      </div>
+      <div class="ailist-meta">
+        <div class="ailist-metric"><div class="ailist-power${top > 100 ? ' over' : ''}"><i style="width:${Math.max(0, Math.min(top, 100))}%"></i></div><span class="ailist-pct">${top}%</span></div>
+        <span class="ailist-grouphint">choose a build ▾</span>
+      </div>
+    </div>
+    <div class="ailist-variants" hidden>
+      ${vs.map(v => `
+        <a class="ailist-variant" href="#${v.route}" data-link>
+          <span class="v-emoji">${v.variantEmoji || v.emoji}</span>
+          <span class="v-main">
+            <span class="v-name">${v.name}${v.variantNew ? '<span class="v-new">NEW</span>' : ''}</span>
+            <span class="v-note">${v.variantNote || ''}</span>
+          </span>
+          <span class="v-badge aicore-badge ${v.badgeClass}">${v.variantLabel || v.badge}</span>
+          <span class="v-metric"><span class="v-bar${v.power > 100 ? ' over' : ''}"><i style="width:${Math.max(0, Math.min(v.power, 100))}%"></i></span><b>${v.power}%</b><small>smart</small></span>
+        </a>`).join('')}
+    </div>
+  </div>`;
+};
 
 const coreDetailHTML = (c) => {
   const backRoute = c.cat === 'experimental' ? '/ai-experimental' : '/ai';
@@ -896,6 +1018,7 @@ POST /api/cmd   { "room": "battlefeuer", "text": "ping" }`)}
     <div class="callout info"><span class="ico">🧠</span><p>Power is measured against <b>GPT-2</b>: <b>100% = GPT-2 (124M) level</b>, and a core can be set above 100 if it beats it. Every core trains on Tiny Shakespeare, clamps to 4 CPU threads, and checkpoints so you can <kbd>Ctrl+C</kbd> and resume.</p></div>
 
     <div class="ailist">
+      ${renderGroupRow(HGEM_GROUP)}
       ${AI_CORES.filter(c => c.cat === 'main').map(coreListRow).join('')}
     </div>
 

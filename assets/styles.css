@@ -1632,3 +1632,59 @@ body.cpu-fullscreen #cpu-app {
   font-size: 10px; font-weight: 800; color: #fff; letter-spacing: .03em;
   text-shadow: 0 1px 2px rgba(0,0,0,.4);
 }
+
+/* ===== AI list — variant group (dropdown of builds) ===== */
+.ailist-groupwrap { display: flex; flex-direction: column; }
+.ailist-group { position: relative; cursor: pointer; user-select: none; }
+.ailist-group:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* small bubble top-right, NEW-badge style, marks that variants exist */
+.ailist-bubble {
+  position: absolute; top: -8px; right: -6px; z-index: 2;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 9px; border-radius: 20px;
+  font-size: 10px; font-weight: 800; letter-spacing: .05em; color: #fff;
+  background: linear-gradient(90deg, var(--accent), #7c5cff);
+  box-shadow: 0 2px 8px rgba(124,92,255,.35);
+}
+.ailist-grouphint {
+  font-size: 11px; font-weight: 600; color: var(--ink-faint);
+  display: flex; align-items: center; gap: 4px; white-space: nowrap;
+}
+.ailist-group.open .ailist-grouphint { color: var(--accent-ink); }
+.ailist-group.open { border-color: var(--accent); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+
+/* the dropdown panel */
+.ailist-variants {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px; margin: 0 4px;
+  border: 1px solid var(--accent); border-top: none;
+  border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;
+  background: var(--bg-soft); animation: fadeIn .18s ease;
+}
+.ailist-variant {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; border-radius: 9px; text-decoration: none; color: inherit;
+  background: var(--bg); border: 1px solid var(--border); transition: border-color .15s, transform .1s;
+}
+.ailist-variant:hover { border-color: var(--accent); transform: translateX(2px); }
+.v-emoji { flex-shrink: 0; font-size: 20px; width: 30px; text-align: center; }
+.v-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.v-name { font-size: 13.5px; font-weight: 700; color: var(--ink); display: flex; align-items: center; gap: 7px; }
+.v-new {
+  font-size: 9px; font-weight: 800; letter-spacing: .04em; color: #fff;
+  background: #7c5cff; padding: 1px 6px; border-radius: 10px;
+}
+.v-note { font-size: 11.5px; color: var(--ink-soft); }
+.v-badge { flex-shrink: 0; }
+.v-metric { flex-shrink: 0; display: flex; align-items: center; gap: 7px; width: 120px; justify-content: flex-end; }
+.v-bar { width: 46px; height: 7px; border-radius: 4px; background: var(--border); overflow: hidden; }
+.v-bar i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, #e0a23c, var(--accent)); }
+.v-bar.over i { background: linear-gradient(90deg, var(--accent), #7c5cff); }
+.v-metric b { font-size: 13px; font-family: var(--mono); font-weight: 700; color: var(--ink); min-width: 36px; text-align: right; }
+.v-metric small { font-size: 9.5px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .04em; }
+
+@media (max-width: 560px) {
+  .v-metric { width: auto; }
+  .v-metric .v-bar, .v-metric small { display: none; }
+}

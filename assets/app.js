@@ -95,6 +95,22 @@
       $('#' + btn.dataset.subtab, strip).classList.add('active');
     }));
 
+    // AI list variant dropdown (group row toggles its sibling .ailist-variants)
+    $$('[data-group-toggle]').forEach(row => {
+      const toggle = () => {
+        const panel = row.nextElementSibling;
+        if (!panel || !panel.classList.contains('ailist-variants')) return;
+        const opening = panel.hasAttribute('hidden');
+        if (opening) panel.removeAttribute('hidden'); else panel.setAttribute('hidden', '');
+        row.classList.toggle('open', opening);
+        row.setAttribute('aria-expanded', opening ? 'true' : 'false');
+      };
+      row.addEventListener('click', toggle);
+      row.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+      });
+    });
+
     // accordion
     $$('.acc-head').forEach(h => h.addEventListener('click', () =>
       h.closest('.acc-item').classList.toggle('open')));
