@@ -48,13 +48,16 @@ procedurally generated worlds. Built as a **game** (subgame) for the
    upgrade your gear.
 4. Dig deep for **gold** and **diamond** — bring torches.
 
-## Regenerating artwork
+## Artwork
 
-All textures are generated procedurally and deterministically:
+Block, item and tool textures are from the **Baunilha** texture pack for
+Luanti / Minetest Game (CC BY-SA 4.0) — see `ATTRIBUTION.md`. A fully
+self-contained procedural fallback set is also included:
 
 ```sh
 cd mods/bc_core
-python3 gen_textures.py    # requires Pillow
+python3 gen_textures.py                    # original procedural placeholders
+python3 reskin_baunilha.py /path/to/pack   # re-apply a Baunilha-style pack
 ```
 
 ## Project layout
@@ -72,7 +75,8 @@ blockcraft_modern/
 
 ## License
 
-- **Code** (`*.lua`, `gen_textures.py`): MIT — see `LICENSE.txt`.
-- **Media** (textures, menu art): CC BY-SA 4.0 — all original to this project.
+- **Code** (`*.lua`, `*.py`): MIT — see `LICENSE.txt`.
+- **Media** (textures, menu art): CC BY-SA 4.0. Block/item/tool textures are
+  from the Baunilha pack; see `ATTRIBUTION.md` and `licenses/`.
 - The **Luanti engine** is a separate work under LGPL 2.1+ and is not
   included in this repository; install it from luanti.org.

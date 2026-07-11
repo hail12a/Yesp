@@ -33,7 +33,13 @@ SOFTWARE.
 
 MEDIA
 -----
-All textures and menu artwork (mods/**/textures/*.png, menu/*.png) are
-original works produced procedurally by gen_textures.py and are licensed
-under the Creative Commons Attribution-ShareAlike 4.0 International license
-(CC BY-SA 4.0): https://creativecommons.org/licenses/by-sa/4.0/
+The shipped block/item/tool textures are derived from the Baunilha texture
+pack for Luanti / Minetest Game (CC BY-SA 4.0; some components CC0 / LGPL
+2.1). The procedural fallback set and menu background are original works of
+this project (CC BY-SA 4.0). Full credits, sources and license texts are in
+ATTRIBUTION.md and the licenses/ folder.
+
+All media is licensed under the Creative Commons Attribution-ShareAlike 4.0
+International license (CC BY-SA 4.0):
+https://creativecommons.org/licenses/by-sa/4.0/
+See licenses/CC-BY-SA-4.0.txt for the full text.

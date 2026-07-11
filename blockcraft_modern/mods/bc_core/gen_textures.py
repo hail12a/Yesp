@@ -4,6 +4,16 @@ Procedural 16x16 pixel-art texture generator for BlockCraft Modern.
 Deterministic (seeded) so regenerating gives identical output.
 Run:  python3 gen_textures.py
 Outputs PNGs into ./textures/
+
+NOTE ON SHIPPED ART:
+    The textures currently committed for blocks, items and tools come from
+    the Baunilha texture pack (see ATTRIBUTION.md), applied via
+    reskin_baunilha.py. This script generates the ORIGINAL, self-contained
+    procedural placeholder set — useful as an offline fallback when no
+    texture pack is available. Re-running it will REPLACE the Baunilha art
+    with procedural placeholders; run reskin_baunilha.py afterwards to
+    restore the pack look. The procedural-only assets that are always kept
+    (bedrock, furnace fuel/arrow gauges, menu background) are produced here.
 """
 import os
 import random
