@@ -12,7 +12,7 @@ src/
 │   ├── ChatPlayerList.client.lua   -- 2018-style custom chat + player list + overhead bubbles
 │   ├── HudClient.client.lua        -- top-right HUD (cash, clock, taskbar, garage, teams, tools)
 │   ├── DealershipClient.client.lua -- dealership shop UI (filters, search, car-type dropdown, buy)
-│   └── AdminClient.client.lua      -- admin panel UI (shown only to admins)
+│   └── AdminClient.client.lua      -- admin panel v2 (animated; Money/Players/World/Effects/Announce/Server)
 │
 ├── ServerScriptService/       -- Scripts (server). Place in ServerScriptService
 │   ├── ShopPrompt.server.lua       -- ProximityPrompt on the "Shop" part -> opens dealership
@@ -70,3 +70,28 @@ These small corrections were made so the files load/run cleanly (originals had t
   instead of `dot`. Fixed to `dot.BackgroundTransparency = 0`.
 
 Everything else is preserved as-is.
+
+## Admin panel v2 (AdminClient + AdminServer)
+
+The admin panel was rebuilt with an animated GUI and a much larger action set.
+It reuses the existing `AdminRequest` / `AdminIsAdmin` remotes — **no new instances
+required**. Open with **F4** or the floating ⚡ button (admins only).
+
+Pages & actions:
+
+- **Money** — give / set / remove cash (with +1K/+10K/+100K/+1M quick chips),
+  give-all, set-all, and multiply-everyone's-cash. Online-player dropdown target.
+- **Players** — bring, goto, teleport, freeze/thaw, WalkSpeed & JumpPower sliders,
+  heal, god / ungod, respawn, kill, kick, ban (super-admin).
+- **World** — time-of-day slider + Dawn/Day/Dusk/Night presets, freeze-time toggle,
+  brightness, fog distance, and gravity sliders (live, replicated via `Lighting`/`Workspace`).
+- **Effects** — fire / sparkles / smoke / neon / clear, explode, fling, and body-size slider.
+- **Announce** — advanced broadcast: message + RGB color picker (with preset chips) +
+  duration slider + animation style (Slide / Fade / Flash). Rendered as an animated
+  top banner for everyone.
+- **Server** — live car list, give-car, and a restart-notice broadcast.
+
+UI niceties: animated open/close (Back easing + fade), rotating gradient title bar,
+custom sliders/toggles/dropdowns, hover tweens, a pulsing launcher button, and a
+colored status line for action feedback. God mode, freezes, and time-freeze are all
+enforced/held server-side.
