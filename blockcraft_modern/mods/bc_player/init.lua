@@ -57,8 +57,19 @@ core.register_on_respawnplayer(function(player)
 end)
 
 core.register_on_joinplayer(function(player)
-	core.chat_send_player(player:get_player_name(),
+	local name = player:get_player_name()
+	core.chat_send_player(name,
 		"Welcome to BlockCraft Modern! Punch trees to gather wood, then craft a workbench.")
+
+	-- Loud warning if the world was created in Creative mode: that (not the
+	-- game) is what makes blocks break instantly and items not stack. The
+	-- fix is a NEW world with Creative unchecked.
+	if core.settings:get_bool("creative_mode") then
+		core.chat_send_player(name,
+			">>> CREATIVE MODE is ON. Blocks break instantly and items won't " ..
+			"stack. For real survival, create a NEW world with Creative Mode " ..
+			"UNCHECKED (and Enable Damage ON).")
+	end
 end)
 
 core.log("action", "[bc_player] Player module loaded")
