@@ -89,7 +89,7 @@ core.register_node("bc_core:cobble", {
 
 core.register_node("bc_core:stonebrick", {
 	description = S("Stone Bricks"),
-	tiles = { "bc_cobble.png^[colorize:#4444440.15" },
+	tiles = { "bc_cobble.png^[colorize:#000000:40" },
 	groups = { cracky = 2, stone = 1 },
 	sounds = sounds("stone"),
 })
