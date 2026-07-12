@@ -101,6 +101,9 @@ core.register_item(":", {
 		full_punch_interval = 0.9,
 		max_drop_level = 0,
 		groupcaps = {
+			-- choppy so bare hands can punch trees/wood (Minecraft-style),
+			-- just slowly. An axe is much faster.
+			choppy = { maxlevel = 0, uses = 0, times = { [1] = 5.0, [2] = 3.5, [3] = 2.5 } },
 			crumbly = { maxlevel = 0, uses = 0, times = { [2] = 3.0, [3] = 0.7 } },
 			snappy = { maxlevel = 0, uses = 0, times = { [3] = 0.4 } },
 			oddly_breakable_by_hand = { maxlevel = 0, uses = 0, times = { [1] = 3.5, [2] = 2.0, [3] = 0.7 } },
