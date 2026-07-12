@@ -39,6 +39,24 @@ rm -rf "$OUT/games/blockcraft_modern/tools" \
 echo "==> Rebranding the main menu"
 cp "$HERE/branding/pack/logo.png"        "$OUT/textures/base/pack/logo.png"
 cp "$HERE/branding/pack/menu_header.png" "$OUT/textures/base/pack/menu_header.png"
+# Full-screen menu background used by the custom menu.
+cp "$HERE/menu/background.png"           "$OUT/textures/base/pack/bc_menu_bg.png"
+
+echo "==> Installing the custom Bedrock-style main menu"
+# Back up the engine's default menu, then replace it with ours. Fully
+# revertable via RESTORE_DEFAULT_MENU.bat.
+if [ ! -f "$OUT/builtin/mainmenu/init.lua.orig" ]; then
+	cp "$OUT/builtin/mainmenu/init.lua" "$OUT/builtin/mainmenu/init.lua.orig"
+fi
+cp "$HERE/menu/custom_mainmenu.lua" "$OUT/builtin/mainmenu/init.lua"
+
+cat > "$OUT/RESTORE_DEFAULT_MENU.bat" <<'BAT'
+@echo off
+rem Restore the engine's original main menu if the custom one misbehaves.
+copy /Y "builtin\mainmenu\init.lua.orig" "builtin\mainmenu\init.lua"
+echo Default menu restored. You can relaunch BlockCraft now.
+pause
+BAT
 
 echo "==> Renaming launcher -> BlockCraft.exe"
 if [ -f "$OUT/bin/luanti.exe" ]; then
