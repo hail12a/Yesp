@@ -12,12 +12,15 @@
 
 -- Per-tier balance. Higher tier = faster digging, higher max drop level,
 -- more uses (uses), and stronger swords (damage).
+-- `times` is the base dig time (seconds) for a tier; lower = faster. Tuned to
+-- feel close to Minecraft: a wooden pickaxe clears stone in ~1.3s, diamond
+-- in ~0.5s, while bare hands can't touch stone at all (see the hand def).
 local tiers = {
-	wood    = { times = 3.0, level = 1, uses = 60,   dmg = 2, full_punch = 1.0 },
-	stone   = { times = 2.0, level = 1, uses = 132,  dmg = 4, full_punch = 1.0 },
-	steel   = { times = 1.5, level = 2, uses = 251,  dmg = 5, full_punch = 0.9 },
-	gold    = { times = 0.9, level = 2, uses = 33,   dmg = 4, full_punch = 0.7 },
-	diamond = { times = 1.0, level = 3, uses = 1562, dmg = 6, full_punch = 0.8 },
+	wood    = { times = 1.6, level = 1, uses = 60,   dmg = 2, full_punch = 1.0 },
+	stone   = { times = 1.2, level = 1, uses = 132,  dmg = 4, full_punch = 1.0 },
+	steel   = { times = 0.9, level = 2, uses = 251,  dmg = 5, full_punch = 0.9 },
+	gold    = { times = 0.5, level = 2, uses = 33,   dmg = 4, full_punch = 0.7 },
+	diamond = { times = 0.7, level = 3, uses = 1562, dmg = 6, full_punch = 0.8 },
 }
 
 -- Build a groupcaps table for a dig group at a given tier speed/level/uses.

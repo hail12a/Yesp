@@ -49,6 +49,19 @@ cat > "$OUT/minetest.conf" <<'CONF'
 # BlockCraft portable configuration
 menu_last_game = blockcraft_modern
 menu_clouds = true
+
+# --- Survival defaults (new worlds) ---
+creative_mode = false
+enable_damage = true
+default_privs = interact, shout
+
+# --- Minecraft-like feel ---
+fov = 72
+# Inventory on E (SDL scancode 8), like Minecraft
+keymap_inventory = SYSTEM_SCANCODE_8
+# Sprint / aux key on Left Ctrl (SDL scancode 224) instead of E
+keymap_special1 = SYSTEM_SCANCODE_224
+
 # Keep the experience self-contained / offline
 contentdb_enable_updates_indicator = false
 show_advanced = false

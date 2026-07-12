@@ -22,19 +22,30 @@ core.register_on_newplayer(function(player)
 end)
 
 ------------------------------------------------------------------
--- Player physics & hotbar
+-- Player physics, health, and survival privileges
 ------------------------------------------------------------------
 core.register_on_joinplayer(function(player)
-	player:set_properties({
-		hp_max = 20,
-	})
-	player:hud_set_hotbar_itemcount(9)
-	-- Slightly snappier default movement, closer to modern voxel games
+	local name = player:get_player_name()
+
+	player:set_properties({ hp_max = 20 })
+	player:hud_set_hotbar_itemcount(8)
+
+	-- Baseline Minecraft-like walking speed. Sprinting (bc_sprint) layers
+	-- a temporary multiplier on top of this.
 	player:set_physics_override({
 		speed = 1.0,
 		jump = 1.0,
 		gravity = 1.0,
 	})
+
+	-- Survival realism: strip creative movement so the old "aux key = fly/run"
+	-- behaviour is gone. Players keep interact/shout (and, in singleplayer,
+	-- can still /grant themselves fly or fast if they want a build session).
+	local privs = core.get_player_privs(name)
+	privs.fly = nil
+	privs.fast = nil
+	privs.noclip = nil
+	core.set_player_privs(name, privs)
 end)
 
 ------------------------------------------------------------------
