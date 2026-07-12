@@ -93,7 +93,10 @@ end
 ------------------------------------------------------------------
 core.register_item(":", {
 	type = "none",
-	wield_scale = { x = 1, y = 1, z = 2.5 },
+	-- First-person arm: a normally-proportioned hand (no z-stretch) skinned
+	-- with a Minecraft-style sleeve+hand (bc_player/textures/wieldhand.png).
+	wield_image = "wieldhand.png",
+	wield_scale = { x = 1, y = 1, z = 1 },
 	tool_capabilities = {
 		full_punch_interval = 0.9,
 		max_drop_level = 0,

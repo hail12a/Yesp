@@ -33,7 +33,8 @@ rm -rf "$OUT/games/blockcraft_modern/tools" \
        "$OUT/games/blockcraft_modern/branding" \
        "$OUT/games/blockcraft_modern/menu/gen_branding.py" \
        "$OUT/games/blockcraft_modern/mods/bc_core/gen_textures.py" \
-       "$OUT/games/blockcraft_modern/mods/bc_core/reskin_baunilha.py"
+       "$OUT/games/blockcraft_modern/mods/bc_core/reskin_baunilha.py" \
+       "$OUT/games/blockcraft_modern/mods/bc_player/gen_player.py"
 
 echo "==> Rebranding the main menu"
 cp "$HERE/branding/pack/logo.png"        "$OUT/textures/base/pack/logo.png"
