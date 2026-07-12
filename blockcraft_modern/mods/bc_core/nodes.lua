@@ -511,38 +511,61 @@ core.register_node("bc_core:crafting_table", {
 		local meta = core.get_meta(pos)
 		meta:set_string("formspec",
 			"size[8,9]" ..
+			"label[2,0.4;Crafting]" ..
 			"list[current_name;craft;2,1;3,3;]" ..
-			"list[current_name;craftpreview;6,2;1,1;]" ..
+			"image[5.1,2.5;1,1;bc_arrow_bg.png^[transformR270]" ..
+			"list[current_name;output;6.2,2;1,1;]" ..
 			"list[current_player;main;0,5;8,4;]" ..
+			"listring[current_name;output]" ..
+			"listring[current_player;main]" ..
 			"listring[current_name;craft]" ..
 			"listring[current_player;main]")
 		meta:set_string("infotext", "Crafting Table")
 		local inv = meta:get_inventory()
 		inv:set_size("craft", 9)
-		inv:set_size("craftpreview", 1)
+		inv:set_size("output", 1)
 	end,
-	on_metadata_inventory_put = function(pos)
+	-- The output slot only shows the result; you can't drop items into it.
+	allow_metadata_inventory_put = function(pos, listname, index, stack)
+		if listname == "output" then return 0 end
+		return stack:get_count()
+	end,
+	allow_metadata_inventory_move = function(pos, from_list, fi, to_list, ti, count)
+		if to_list == "output" then return 0 end
+		return count
+	end,
+	on_metadata_inventory_put = function(pos, listname)
+		if listname == "craft" then bc_core.update_crafting_preview(pos) end
+	end,
+	on_metadata_inventory_move = function(pos)
 		bc_core.update_crafting_preview(pos)
 	end,
-	on_metadata_inventory_take = function(pos)
+	on_metadata_inventory_take = function(pos, listname)
+		if listname == "output" then
+			-- Result was taken: consume one set of ingredients from the grid.
+			local inv = core.get_meta(pos):get_inventory()
+			local _, after = core.get_craft_result({
+				method = "normal", width = 3, items = inv:get_list("craft"),
+			})
+			inv:set_list("craft", after.items)
+		end
 		bc_core.update_crafting_preview(pos)
 	end,
 	can_dig = function(pos)
 		local inv = core.get_meta(pos):get_inventory()
-		return inv:is_empty("craft")
+		return inv:is_empty("craft") and inv:is_empty("output")
 	end,
 })
 
--- Live 3x3 craft preview for the crafting table
+-- Recompute the crafting table's output slot from its 3x3 grid.
 function bc_core.update_crafting_preview(pos)
 	local inv = core.get_meta(pos):get_inventory()
-	local grid = inv:get_list("craft")
-	local output, _ = core.get_craft_result({
+	local output = core.get_craft_result({
 		method = "normal",
 		width = 3,
-		items = grid,
+		items = inv:get_list("craft"),
 	})
-	inv:set_stack("craftpreview", 1, output.item)
+	inv:set_stack("output", 1, output.item)
 end
 
 core.register_node("bc_core:chest", {

@@ -33,6 +33,16 @@ end)
 core.register_on_joinplayer(function(player)
 	player:set_properties({ hp_max = 20 })
 	player:hud_set_hotbar_itemcount(8)
+
+	-- Stop the aux key (E) from triggering the engine's fast/fly movement.
+	-- This is game-side and reliable (unlike client keybind config). Sprinting
+	-- is instead handled by bc_sprint via double-tapping forward.
+	local name = player:get_player_name()
+	local privs = core.get_player_privs(name)
+	privs.fast = nil
+	privs.fly = nil
+	privs.noclip = nil
+	core.set_player_privs(name, privs)
 end)
 
 ------------------------------------------------------------------
