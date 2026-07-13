@@ -86,6 +86,16 @@ contentdb_enable_updates_indicator = false
 show_advanced = false
 enable_split_login_register = false
 name = Player
+
+# --- Server (used by Start_Server.bat) ---
+server_name = BlockCraft Server
+server_description = A BlockCraft Modern server
+max_users = 15
+port = 30000
+# Do not announce to the public server list by default (LAN / direct-IP only)
+server_announce = false
+# Let friends join without registering an account
+disallow_empty_password = false
 CONF
 
 echo "==> Writing launcher + player readme"
@@ -94,6 +104,80 @@ cat > "$OUT/Start BlockCraft.bat" <<'BAT'
 cd /d "%~dp0"
 start "" "bin\BlockCraft.exe"
 BAT
+
+# Dedicated LAN/online server launcher.
+cat > "$OUT/Start Server.bat" <<'BAT'
+@echo off
+cd /d "%~dp0"
+set WORLD=worlds\server_world
+if not exist "%WORLD%" mkdir "%WORLD%"
+echo ============================================================
+echo   BlockCraft Modern - Dedicated Server
+echo ------------------------------------------------------------
+echo   Others on your Wi-Fi/LAN join with YOUR local IP + port 30000.
+echo   Find your IP: open a new Command Prompt and type  ipconfig
+echo   (use the "IPv4 Address", e.g. 192.168.1.23)
+echo.
+echo   For friends over the internet you must forward UDP port
+echo   30000 on your router to this PC. See SERVER_README.txt.
+echo.
+echo   The FIRST time, allow "BlockCraft.exe" through Windows
+echo   Firewall (tick Private networks) when prompted.
+echo ------------------------------------------------------------
+echo   Leave this window open while playing. Close it to stop.
+echo ============================================================
+echo.
+"bin\BlockCraft.exe" --server --world "%WORLD%" --gameid blockcraft_modern --port 30000
+pause
+BAT
+
+cat > "$OUT/SERVER_README.txt" <<'TXT'
+BlockCraft Modern - Running a Server
+====================================
+
+QUICK START (same Wi-Fi / LAN)
+------------------------------
+1. On the HOST PC, double-click "Start Server.bat".
+   - The first time, Windows Firewall will ask to allow BlockCraft.exe.
+     Tick "Private networks" and click Allow. (If you miss it, allow
+     bin\BlockCraft.exe manually in Windows Defender Firewall.)
+   - Leave the black server window open. Closing it stops the server.
+
+2. Find the host's local IP address:
+   - On the host, open Command Prompt and type:  ipconfig
+   - Note the "IPv4 Address", e.g. 192.168.1.23
+
+3. Each player (including the host, in a second window) launches
+   "Start BlockCraft.bat", clicks MULTIPLAYER, and enters:
+       Address:  192.168.1.23   (the host's IPv4)
+       Port:     30000
+       Name:     (anything)
+   then Connect.
+
+   The host can also join their own server using Address 127.0.0.1.
+
+PLAYING OVER THE INTERNET
+-------------------------
+Friends outside your home network need to reach your PC:
+
+Option A - Port forwarding (classic):
+   - In your router settings, forward UDP port 30000 to the host PC's
+     local IP (from step 2 above).
+   - Friends connect to your PUBLIC IP (google "what is my ip") + port 30000.
+
+Option B - Easier, no router setup: use a virtual-LAN tool like Radmin VPN
+   or ZeroTier. Everyone installs it and joins the same virtual network,
+   then friends connect to the host's virtual-LAN IP + port 30000.
+
+NOTES
+-----
+- The server world is stored in  worlds\server_world  and persists between
+  runs. Delete that folder to start fresh.
+- Survival/creative and damage for the server come from minetest.conf
+  (creative_mode / enable_damage) in this folder - edit before first run.
+- Default port is 30000 (UDP). Change it in "Start Server.bat" and in
+  minetest.conf if needed.
+TXT
 
 cat > "$OUT/PLAY.txt" <<'TXT'
 BlockCraft Modern
