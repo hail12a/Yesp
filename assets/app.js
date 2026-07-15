@@ -26,8 +26,17 @@
   }
 
   function render() {
+    // auth gate before anything else
+    if (window.DOI && !window.DOI.store.isAuthed()) {
+      window.DOI.renderGate('login');
+      return;
+    }
+
     const path = currentPath();
     const page = PAGES[path];
+
+    // discord-shell home gets full-bleed body
+    document.body.classList.toggle('doi-home', path === '/overview');
 
     content.innerHTML = page.html();
     content.scrollIntoView({ block: 'start' });
@@ -37,9 +46,19 @@
     syncTopNav(page.section);
     buildTOC();
     wireInteractions();
+
+    // wire the DOI shell interactions on the home page
+    if (path === '/overview' && window.DOI && typeof window.DOI.wireHome === 'function') {
+      window.DOI.wireHome(content);
+    }
+
     sidebar.classList.remove('open');
-    document.title = `${page.title} · Yesp Docs`;
+    document.title = `${page.title} · DOI`;
   }
+
+  // allow doi.js to trigger a full re-render (e.g. after posting a message)
+  window.__doiRender = render;
+  window.addEventListener('doi:auth', render);
 
   /* ---------- SIDEBAR (section-aware, like the reference) ---------- */
   function syncSidebar(section, path) {
