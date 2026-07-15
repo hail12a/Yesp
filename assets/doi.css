@@ -446,7 +446,31 @@ a.doi-rail-item { text-decoration: none; }
   display: flex; gap: 12px; padding: 6px 8px;
   border-radius: 6px;
   animation: doiSlideUp .25s var(--doi-ease-out);
+  position: relative;
 }
+.doi-msg-actions {
+  position: absolute; top: -14px; right: 20px;
+  display: none; gap: 2px; padding: 3px;
+  background: var(--doi-panel); border: 1px solid rgba(0,0,0,.35);
+  border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.35);
+}
+.doi-msg:hover .doi-msg-actions { display: flex; }
+.doi-msg-act {
+  width: 30px; height: 30px; border-radius: 6px;
+  display: grid; place-items: center;
+  background: transparent; border: none; color: var(--doi-ink-3);
+  cursor: pointer; transition: background .12s ease, color .12s ease;
+}
+.doi-msg-act:hover { background: var(--doi-hover); color: #fff; }
+.doi-msg-act.doi-msg-del:hover { background: var(--doi-red); color: #fff; }
+.doi-msg-edit-ta {
+  width: 100%; min-height: 60px; padding: 10px 12px;
+  background: var(--doi-panel-3); border: 1px solid var(--doi-accent);
+  border-radius: 8px; color: var(--doi-ink); font-family: var(--sans);
+  font-size: 15px; outline: none; resize: vertical;
+}
+.doi-msg-edited { color: var(--doi-ink-dim); font-size: 11px; }
+
 .doi-msg:hover { background: rgba(0,0,0,.15); }
 .doi-msg .doi-avatar { width: 40px; height: 40px; }
 .doi-msg-body { flex: 1; min-width: 0; }
@@ -870,6 +894,67 @@ a.doi-rail-item { text-decoration: none; }
 .doi-theme-choice-preview.discord { background: linear-gradient(135deg,#5865f2 0%, #313338 100%); }
 .doi-theme-choice-preview.insurgency { background: linear-gradient(135deg,#c8102e 0%, #050505 100%); }
 .doi-theme-choice-label { color: var(--doi-ink); font-weight: 600; font-size: 13px; }
+
+/* ---------- MINI SELF POPUP (anchored bottom-left) ---------- */
+.doi-mini-anchor { position: fixed; inset: 0; z-index: 260; }
+.doi-mini-anchor[hidden] { display: none; }
+.doi-mini-backdrop { position: absolute; inset: 0; background: transparent; }
+.doi-mini {
+  position: absolute; left: 12px; bottom: 68px;
+  width: 300px;
+  background: rgba(37,38,43,.85);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 14px;
+  box-shadow: 0 30px 80px rgba(0,0,0,.6);
+  overflow: hidden;
+  backdrop-filter: var(--doi-blur); -webkit-backdrop-filter: var(--doi-blur);
+  animation: doiScaleIn .3s var(--doi-ease-out);
+}
+.doi-mini-banner { height: 68px; position: relative; }
+.doi-mini-avatarwrap {
+  position: absolute; left: 14px; top: 34px;
+  padding: 5px; background: var(--doi-panel); border-radius: 50%;
+}
+.doi-mini-avatarwrap .doi-avatar { width: 76px; height: 76px; }
+.doi-mini-online {
+  position: absolute; right: 3px; bottom: 3px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--doi-green); border: 4px solid var(--doi-panel);
+}
+.doi-mini-body { padding: 46px 14px 12px; }
+.doi-mini-name { color: #fff; font-size: 18px; font-weight: 700; }
+.doi-mini-sub { color: var(--doi-ink-3); font-size: 13px; margin-top: 2px; }
+.doi-mini-bio {
+  color: var(--doi-ink-2); font-size: 13px; line-height: 1.4;
+  margin-top: 10px; padding: 10px 12px;
+  background: rgba(0,0,0,.28); border-radius: 8px;
+  max-height: 80px; overflow: hidden;
+}
+.doi-mini-link {
+  margin-top: 6px; color: var(--doi-ink-3); font-size: 12px;
+  cursor: pointer; padding: 4px 2px;
+}
+.doi-mini-link:hover { color: #fff; text-decoration: underline; }
+.doi-mini-list {
+  margin-top: 10px; background: rgba(0,0,0,.28); border-radius: 10px;
+  overflow: hidden;
+}
+.doi-mini-row {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; background: transparent; border: none;
+  color: var(--doi-ink); font-family: var(--sans); font-size: 14px;
+  cursor: pointer; transition: background .12s ease;
+  border-top: 1px solid rgba(255,255,255,.05);
+}
+.doi-mini-row:first-child { border-top: none; }
+.doi-mini-row:hover { background: rgba(255,255,255,.06); }
+.doi-mini-row svg { color: var(--doi-ink-3); flex-shrink: 0; }
+.doi-mini-row span { flex: 1; text-align: left; }
+.doi-mini-row .doi-mini-chev { flex: 0; color: var(--doi-ink-4); font-size: 18px; line-height: 1; }
+.doi-mini-statusdot {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--doi-green); flex-shrink: 0;
+}
 
 /* newcat button */
 .doi-newcat-btn {

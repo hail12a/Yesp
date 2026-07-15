@@ -716,12 +716,37 @@ async function handleApi(req, res, urlPath, query) {
         const text = String(m.text || "").trim().slice(0, 2000);
         if (!text) return sendJSON(res, { error: "empty message" }, 400);
         s.chat = s.chat || {}; s.chat[cid] = s.chat[cid] || [];
-        const post = { id: "c-" + crypto.randomBytes(5).toString("hex"), author: u.name, ts: Date.now(), text };
+        const post = { id: "c-" + crypto.randomBytes(5).toString("hex"), author: u.name, authorKey: u.key, ts: Date.now(), text };
         s.chat[cid].push(post);
         if (s.chat[cid].length > DOI_MSG_CAP) s.chat[cid].splice(0, s.chat[cid].length - DOI_MSG_CAP);
         saveDoi();
         return sendJSON(res, { ok: true, message: post });
       }
+    }
+  }
+  // Edit or delete a channel message (author-only, or server owner)
+  {
+    const mm = urlPath.match(/^\/api\/doi\/servers\/([^/]+)\/chat\/([^/]+)\/(edit|delete)$/);
+    if (mm && req.method === "POST") {
+      const m = await readBody(req);
+      const u = doiUserFromToken(m.token);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const s = doiStore.servers[mm[1]];
+      if (!s) return sendJSON(res, { error: "not found" }, 404);
+      const cid = mm[2], op = mm[3];
+      const list = (s.chat && s.chat[cid]) || [];
+      const idx = list.findIndex(x => x.id === m.mid);
+      if (idx === -1) return sendJSON(res, { error: "message not found" }, 404);
+      const msg = list[idx];
+      const isAuthor = msg.authorKey === u.key || msg.author === u.name;
+      const isOwner  = s.ownerKey === u.key;
+      if (!isAuthor && !(isOwner && op === "delete")) return sendJSON(res, { error: "not allowed" }, 403);
+      if (op === "delete") { list.splice(idx, 1); saveDoi(); return sendJSON(res, { ok: true, deleted: m.mid }); }
+      const text = String(m.text || "").trim().slice(0, 2000);
+      if (!text) return sendJSON(res, { error: "empty message" }, 400);
+      msg.text = text; msg.edited = Date.now();
+      saveDoi();
+      return sendJSON(res, { ok: true, message: msg });
     }
   }
 
@@ -896,6 +921,29 @@ async function handleApi(req, res, urlPath, query) {
       if (doiStore.dms[pk].length > DOI_MSG_CAP) doiStore.dms[pk].splice(0, doiStore.dms[pk].length - DOI_MSG_CAP);
       saveDoi();
       return sendJSON(res, { ok: true, message: post });
+    }
+  }
+  // Edit or delete a DM (author only)
+  {
+    const mm = urlPath.match(/^\/api\/doi\/dms\/([^/]+)\/(edit|delete)$/);
+    if (mm && req.method === "POST") {
+      const m = await readBody(req);
+      const u = doiUserFromToken(m.token);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const otherKey = mm[1].toLowerCase(), op = mm[2];
+      if (!accounts.users[otherKey]) return sendJSON(res, { error: "not found" }, 404);
+      const pk = dmPairKey(u.key, otherKey);
+      const list = doiStore.dms[pk] || [];
+      const idx = list.findIndex(x => x.id === m.mid);
+      if (idx === -1) return sendJSON(res, { error: "message not found" }, 404);
+      const msg = list[idx];
+      if (msg.fromKey !== u.key) return sendJSON(res, { error: "not allowed" }, 403);
+      if (op === "delete") { list.splice(idx, 1); saveDoi(); return sendJSON(res, { ok: true, deleted: m.mid }); }
+      const text = String(m.text || "").trim().slice(0, 2000);
+      if (!text) return sendJSON(res, { error: "empty message" }, 400);
+      msg.text = text; msg.edited = Date.now();
+      saveDoi();
+      return sendJSON(res, { ok: true, message: msg });
     }
   }
 

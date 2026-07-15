@@ -13,9 +13,9 @@
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
   const TOKEN_KEY = 'doi.token';
-  const LOGO_URL       = 'assets/img/doi-logo.png?v=20260715f';
-  const HERO_TEAM_URL  = 'assets/img/hero-team.png?v=20260715f';
-  const HERO_GATE_URL  = 'assets/img/hero-gate.png?v=20260715f';
+  const LOGO_URL       = 'assets/img/doi-logo.png?v=20260715g';
+  const HERO_TEAM_URL  = 'assets/img/hero-team.png?v=20260715g';
+  const HERO_GATE_URL  = 'assets/img/hero-gate.png?v=20260715g';
   window.DOI_LOGO_URL = LOGO_URL;
 
   /* ---------- CACHE ---------- */
@@ -92,6 +92,10 @@
     dm:  (otherKey, since) => jfetch('/api/doi/dms/' + q(otherKey) + '?token=' + q(cache.token || '') + (since ? '&since=' + since : '')),
     sendDM: (otherKey, text) => jfetch('/api/doi/dms/' + q(otherKey), { method: 'POST', body: JSON.stringify({ token: cache.token, text }) }),
     closeDM: (otherKey) => jfetch('/api/doi/dms/' + q(otherKey) + '/close', { method: 'POST', body: JSON.stringify({ token: cache.token }) }),
+    editChat:  (sid, cid, mid, text) => jfetch('/api/doi/servers/' + q(sid) + '/chat/' + q(cid) + '/edit',   { method: 'POST', body: JSON.stringify({ token: cache.token, mid, text }) }),
+    delChat:   (sid, cid, mid)       => jfetch('/api/doi/servers/' + q(sid) + '/chat/' + q(cid) + '/delete', { method: 'POST', body: JSON.stringify({ token: cache.token, mid }) }),
+    editDM:    (otherKey, mid, text) => jfetch('/api/doi/dms/' + q(otherKey) + '/edit',   { method: 'POST', body: JSON.stringify({ token: cache.token, mid, text }) }),
+    delDM:     (otherKey, mid)       => jfetch('/api/doi/dms/' + q(otherKey) + '/delete', { method: 'POST', body: JSON.stringify({ token: cache.token, mid }) }),
 
     publicProfile: (userKey) => jfetch('/api/doi/profile/' + q(userKey) + '?token=' + q(cache.token || '')),
   };
@@ -430,7 +434,7 @@
 
   function userPanel(p) {
     return `<div class="doi-userpanel">
-      <div class="doi-uleft" data-shell-opensettings title="Edit your account">
+      <div class="doi-uleft" data-shell-minipopup title="Show profile">
         ${avatarHTML(p.name, p.avatar, 36)}
         <div class="doi-uinfo">
           <div class="doi-uname">${esc(p.name)}${p.isDOI ? ' <span class="doi-badge-owner">OWNER</span>':''}</div>
@@ -583,30 +587,45 @@
     return `<div class="doi-main-head doi-main-head-dm">${head}</div>${body}`;
   }
 
+  function msgActions(mine) {
+    if (!mine) return '';
+    return `<div class="doi-msg-actions">
+      <button class="doi-msg-act" data-msg-edit title="Edit">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+      </button>
+      <button class="doi-msg-act doi-msg-del" data-msg-del title="Delete">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+      </button>
+    </div>`;
+  }
   function dmMsgHTML(m) {
-    return `<div class="doi-msg">
+    const mine = cache.profile && (m.fromKey === cache.profile.key || m.from === cache.profile.name);
+    return `<div class="doi-msg" data-mid="${esc(m.id)}" data-mine="${mine?'1':''}">
       ${avatarHTML(m.from, null, 40)}
       <div class="doi-msg-body">
         <div class="doi-msg-head">
           <span class="doi-msg-name">${esc(m.from)}</span>
-          <span class="doi-msg-time">${timeAgo(m.ts)}</span>
+          <span class="doi-msg-time">${timeAgo(m.ts)}${m.edited ? ' · <span class="doi-msg-edited">(edited)</span>':''}</span>
         </div>
         <div class="doi-msg-text">${esc(m.text)}</div>
       </div>
+      ${msgActions(mine)}
     </div>`;
   }
 
   function msgHTML(m) {
     const isOfficer = m.author === 'DOI' || /^Cmdr\./i.test(m.author);
-    return `<div class="doi-msg">
+    const mine = cache.profile && (m.authorKey === cache.profile.key || m.author === cache.profile.name);
+    return `<div class="doi-msg" data-mid="${esc(m.id)}" data-mine="${mine?'1':''}">
       ${avatarHTML(m.author, null, 40)}
       <div class="doi-msg-body">
         <div class="doi-msg-head">
           <span class="doi-msg-name ${isOfficer?'doi-officer':''}">${esc(m.author)}</span>
-          <span class="doi-msg-time">${timeAgo(m.ts)}</span>
+          <span class="doi-msg-time">${timeAgo(m.ts)}${m.edited ? ' · <span class="doi-msg-edited">(edited)</span>':''}</span>
         </div>
         <div class="doi-msg-text">${esc(m.text)}</div>
       </div>
+      ${msgActions(mine)}
     </div>`;
   }
   function composerHTML(label, isDM) {
@@ -689,6 +708,8 @@
       <div class="doi-modal doi-modal-popup" id="doiProfilePopup" hidden>
         <div class="doi-modal-inner doi-pp-inner"></div>
       </div>
+
+      <div class="doi-mini-anchor" id="doiMiniAnchor" hidden></div>
 
       <div class="doi-modal doi-modal-full" id="doiUserSettings" hidden></div>`;
   }
@@ -822,6 +843,60 @@
       catch (er) { alert(er.message); }
     });
     inner.querySelector('[data-shell-opensettings]')?.addEventListener('click', () => { modal.hidden = true; openSettings(); });
+  }
+
+  /* ---------- MINI SELF POPUP (bottom-left of screen) ---------- */
+  function openMiniPopup() {
+    const p = cache.profile || {};
+    const anchor = document.getElementById('doiMiniAnchor');
+    if (!anchor) return;
+    anchor.hidden = false;
+    anchor.innerHTML = `
+      <div class="doi-mini-backdrop" data-mini-close></div>
+      <div class="doi-mini">
+        <div class="doi-mini-banner" style="background:${esc(p.bannerColor||'#5865f2')}"></div>
+        <div class="doi-mini-avatarwrap">${avatarHTML(p.name, p.avatar, 76)}<span class="doi-mini-online"></span></div>
+        <div class="doi-mini-body">
+          <div class="doi-mini-name">${esc(p.name||'')}${p.isDOI ? ' <span class="doi-badge-owner">OWNER</span>':''}</div>
+          <div class="doi-mini-sub">${esc(p.tag||'')} ${p.pronouns ? '· ' + esc(p.pronouns) : ''}</div>
+          ${p.bio ? `<div class="doi-mini-bio">${esc(p.bio.slice(0,120))}${p.bio.length>120?'…':''}</div>
+                    <div class="doi-mini-link" data-mini-viewbio>View Full Bio</div>` : ''}
+          <div class="doi-mini-list">
+            <button class="doi-mini-row" data-mini-editprofile>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+              <span>Edit Profile</span>
+              <span class="doi-mini-chev">›</span>
+            </button>
+            <button class="doi-mini-row" data-mini-status>
+              <span class="doi-mini-statusdot"></span>
+              <span>Online</span>
+              <span class="doi-mini-chev">›</span>
+            </button>
+          </div>
+          <div class="doi-mini-list">
+            <button class="doi-mini-row" data-mini-signout>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+              <span>Switch Accounts</span>
+              <span class="doi-mini-chev">›</span>
+            </button>
+            <button class="doi-mini-row" data-mini-copyid>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <span>Copy User ID</span>
+            </button>
+          </div>
+        </div>
+      </div>`;
+    const close = () => { anchor.hidden = true; anchor.innerHTML = ''; };
+    anchor.querySelector('[data-mini-close]').addEventListener('click', close);
+    anchor.querySelector('[data-mini-editprofile]').addEventListener('click', () => { close(); openSettings('profile'); });
+    anchor.querySelector('[data-mini-viewbio]')?.addEventListener('click', () => { close(); openProfilePopup(p.key); });
+    anchor.querySelector('[data-mini-status]').addEventListener('click', () => { /* status placeholder */ });
+    anchor.querySelector('[data-mini-signout]').addEventListener('click', () => { close(); signOut(); });
+    anchor.querySelector('[data-mini-copyid]').addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(p.key || ''); } catch (_) {}
+      const btn = anchor.querySelector('[data-mini-copyid] span:nth-child(2)');
+      if (btn) { const t = btn.textContent; btn.textContent = 'Copied!'; setTimeout(() => { btn.textContent = t; }, 1200); }
+    });
   }
 
   /* ---------- SETTINGS MODAL ---------- */
@@ -1138,6 +1213,26 @@
     const form = container.querySelector('[data-composer]');
     if (form && !form.dataset.wired) {
       form.dataset.wired = '1';
+      const inputEl = form.querySelector('input');
+      if (inputEl) inputEl.addEventListener('keydown', ev => {
+        if (ev.key !== 'ArrowUp' || inputEl.value.trim()) return;
+        // find my last message and trigger its edit affordance
+        const isDM = form.dataset.dm;
+        const list = isDM ? (cache.dmMessages[state.dmWith] || [])
+                          : (cache.chat[state.server + ':' + state.channel] || []);
+        const me = cache.profile;
+        if (!me) return;
+        for (let i = list.length - 1; i >= 0; i--) {
+          const m = list[i];
+          const mine = (m.authorKey === me.key) || (m.fromKey === me.key) || (m.author === me.name) || (m.from === me.name);
+          if (mine) {
+            ev.preventDefault();
+            const btn = container.querySelector('.doi-msg[data-mid="' + m.id.replace(/"/g,'\\"') + '"] [data-msg-edit]');
+            if (btn) btn.click();
+            return;
+          }
+        }
+      });
       form.addEventListener('submit', async e => {
         e.preventDefault();
         const input = form.querySelector('input');
@@ -1224,6 +1319,73 @@
         openProfilePopup(el.dataset.openProfile);
       });
     });
+    // message edit / delete
+    $$('[data-msg-del]', container).forEach(b => {
+      if (b.dataset.wired) return; b.dataset.wired = '1';
+      b.addEventListener('click', async e => {
+        e.stopPropagation();
+        const msgEl = b.closest('.doi-msg');
+        const mid = msgEl && msgEl.dataset.mid;
+        if (!mid) return;
+        if (!confirm('Delete this message?')) return;
+        try {
+          const isDM = state.server === 'home' && state.dmWith;
+          if (isDM) await api.delDM(state.dmWith, mid);
+          else      await api.delChat(state.server, state.channel, mid);
+          // remove from cache immediately
+          if (isDM) {
+            const list = cache.dmMessages[state.dmWith] || [];
+            const i = list.findIndex(x => x.id === mid); if (i !== -1) list.splice(i, 1);
+          } else {
+            const key = state.server + ':' + state.channel;
+            const list = cache.chat[key] || [];
+            const i = list.findIndex(x => x.id === mid); if (i !== -1) list.splice(i, 1);
+          }
+          rerenderMainSoft();
+        } catch (e2) { alert('Delete failed: ' + e2.message); }
+      });
+    });
+    $$('[data-msg-edit]', container).forEach(b => {
+      if (b.dataset.wired) return; b.dataset.wired = '1';
+      b.addEventListener('click', e => {
+        e.stopPropagation();
+        const msgEl = b.closest('.doi-msg');
+        const mid = msgEl && msgEl.dataset.mid;
+        const textEl = msgEl && msgEl.querySelector('.doi-msg-text');
+        if (!mid || !textEl) return;
+        const cur = textEl.textContent;
+        const ta = document.createElement('textarea');
+        ta.className = 'doi-msg-edit-ta';
+        ta.value = cur; ta.maxLength = 2000;
+        textEl.replaceWith(ta);
+        ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+        const cancel = () => { rerenderMainSoft(); };
+        const commit = async () => {
+          const v = ta.value.trim();
+          if (!v || v === cur) return cancel();
+          try {
+            const isDM = state.server === 'home' && state.dmWith;
+            const r = isDM ? await api.editDM(state.dmWith, mid, v) : await api.editChat(state.server, state.channel, mid, v);
+            const msg = r.message;
+            if (isDM) {
+              const list = cache.dmMessages[state.dmWith] || [];
+              const i = list.findIndex(x => x.id === mid); if (i !== -1) list[i] = msg;
+            } else {
+              const key = state.server + ':' + state.channel;
+              const list = cache.chat[key] || [];
+              const i = list.findIndex(x => x.id === mid); if (i !== -1) list[i] = msg;
+            }
+            rerenderMainSoft();
+          } catch (er) { alert('Edit failed: ' + er.message); cancel(); }
+        };
+        ta.addEventListener('keydown', ev => {
+          if (ev.key === 'Escape') { ev.preventDefault(); cancel(); }
+          else if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); commit(); }
+        });
+        ta.addEventListener('blur', commit, { once: true });
+      });
+    });
+
     // DM open from friend row
     $$('[data-dm-open]', container).forEach(b => {
       if (b.dataset.wired) return; b.dataset.wired = '1';
@@ -1296,6 +1458,11 @@
     $$('[data-shell-openprofile]', container).forEach(el => el.addEventListener('click', e => {
       e.stopPropagation();
       openProfilePopup(el.dataset.pkey);
+    }));
+    // bottom-left user panel → Discord-style mini popup
+    $$('[data-shell-minipopup]', container).forEach(el => el.addEventListener('click', e => {
+      e.stopPropagation();
+      openMiniPopup();
     }));
 
     // new server modal
