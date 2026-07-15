@@ -143,15 +143,17 @@ function userFromToken(t) {
 const world = {}; // key -> { user, lat, lng, heading, speed, mode, car, carLat, carLng, ts }
 const WORLD_TTL = 15000;
 
-/* ---- DOI network (servers, channels, chat, friends, profiles) ---- */
+/* ---- DOI network (servers, channels, chat, friends, DMs, profiles) ---- */
 const DOI_FILE = path.join(__dirname, "doi.json");
-let doiStore = { servers: {}, friends: {}, profiles: {} };
+let doiStore = { servers: {}, friends: {}, friendReqs: {}, dms: {}, profiles: {} };
 try {
   const loaded = JSON.parse(fs.readFileSync(DOI_FILE, "utf8"));
   if (loaded && typeof loaded === "object") {
-    doiStore.servers  = (loaded.servers  && typeof loaded.servers  === "object") ? loaded.servers  : {};
-    doiStore.friends  = (loaded.friends  && typeof loaded.friends  === "object") ? loaded.friends  : {};
-    doiStore.profiles = (loaded.profiles && typeof loaded.profiles === "object") ? loaded.profiles : {};
+    doiStore.servers    = (loaded.servers    && typeof loaded.servers    === "object") ? loaded.servers    : {};
+    doiStore.friends    = (loaded.friends    && typeof loaded.friends    === "object") ? loaded.friends    : {};
+    doiStore.friendReqs = (loaded.friendReqs && typeof loaded.friendReqs === "object") ? loaded.friendReqs : {};
+    doiStore.dms        = (loaded.dms        && typeof loaded.dms        === "object") ? loaded.dms        : {};
+    doiStore.profiles   = (loaded.profiles   && typeof loaded.profiles   === "object") ? loaded.profiles   : {};
   }
 } catch (_) {}
 
@@ -207,16 +209,29 @@ function doiUserFromToken(t) {
   return rec ? { key: k, name: rec.user } : null;
 }
 function doiProfile(key) {
-  const p = doiStore.profiles[key];
+  const p = doiStore.profiles[key] || {};
   const rec = accounts.users[key];
   return {
+    key,
     name: rec ? rec.user : key,
-    tag:  (p && p.tag)   || ("#" + String(1000 + (Math.abs(hashCode(key)) % 9000))),
-    bio:  (p && p.bio)   || "Insurgent",
-    avatar: (p && p.avatar) || null,
+    tag:  p.tag   || ("#" + String(1000 + (Math.abs(hashCode(key)) % 9000))),
+    bio:  p.bio   || "Insurgent",
+    pronouns: p.pronouns || "",
+    avatar: p.avatar || null,
+    bannerColor: p.bannerColor || defaultBanner(key),
+    messagePrivacy: p.messagePrivacy || "anyone",   // "anyone" | "friends"
     joined: (rec && rec.created) || Date.now(),
-    isDOI: rec && rec.user === "DOI"
+    isDOI: !!(rec && rec.user === "DOI")
   };
+}
+function defaultBanner(key) {
+  const h = Math.abs(hashCode(key));
+  const palette = ["#5865f2","#3b7ec1","#6b4bd4","#8b5cf6","#c8102e","#0e7a3f","#9c8f4f","#2a4d69"];
+  return palette[h % palette.length];
+}
+function dmPairKey(a, b) { return a < b ? a + "|" + b : b + "|" + a; }
+function areFriends(a, b) {
+  return (doiStore.friends[a] || []).includes(b);
 }
 function hashCode(s) { let h = 0; for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0; return h; }
 
@@ -458,11 +473,34 @@ async function handleApi(req, res, urlPath, query) {
     const u = doiUserFromToken(m.token);
     if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
     const p = doiStore.profiles[u.key] || {};
-    if (typeof m.bio === "string")    p.bio    = m.bio.slice(0, 120);
+    if (typeof m.bio === "string")           p.bio      = m.bio.slice(0, 200);
+    if (typeof m.pronouns === "string")      p.pronouns = m.pronouns.slice(0, 20);
+    if (typeof m.bannerColor === "string" && /^#[0-9a-fA-F]{3,8}$/.test(m.bannerColor)) p.bannerColor = m.bannerColor;
+    if (m.messagePrivacy === "friends" || m.messagePrivacy === "anyone") p.messagePrivacy = m.messagePrivacy;
     if (typeof m.avatar === "string") { if (m.avatar.length < 260_000) p.avatar = m.avatar; }
     doiStore.profiles[u.key] = p;
     saveDoi();
     return sendJSON(res, { ok: true, profile: doiProfile(u.key) });
+  }
+
+  // Public profile of any user (for popup card). Doesn't leak email, hash, etc.
+  {
+    const mm = urlPath.match(/^\/api\/doi\/profile\/([^/]+)$/);
+    if (mm && req.method === "GET") {
+      const tok = query.get("token") || "";
+      const u = doiUserFromToken(tok);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const targetKey = mm[1].toLowerCase();
+      if (!accounts.users[targetKey]) return sendJSON(res, { error: "not found" }, 404);
+      const prof = doiProfile(targetKey);
+      const friendState =
+        targetKey === u.key ? "self" :
+        areFriends(u.key, targetKey) ? "friends" :
+        (doiStore.friendReqs[targetKey] || []).some(r => r.from === u.key) ? "outgoing" :
+        (doiStore.friendReqs[u.key] || []).some(r => r.from === targetKey) ? "incoming" :
+        "none";
+      return sendJSON(res, { ok: true, profile: prof, friendState });
+    }
   }
 
   /* ---- servers ---- */
@@ -684,22 +722,30 @@ async function handleApi(req, res, urlPath, query) {
     }
   }
 
-  /* ---- friends ---- */
+  /* ---- friends (with request model) ---- */
   if (urlPath === "/api/doi/friends" && req.method === "GET") {
     const tok = query.get("token") || "";
     const u = doiUserFromToken(tok);
     if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
-    const list = (doiStore.friends[u.key] || []).map(k => {
-      const rec = accounts.users[k];
-      const prof = doiProfile(k);
-      return {
-        key: k, name: rec ? rec.user : k,
-        avatar: prof.avatar, bio: prof.bio, tag: prof.tag
-      };
-    });
+    const list = (doiStore.friends[u.key] || []).map(k => doiProfile(k));
     return sendJSON(res, { ok: true, friends: list });
   }
-  if (urlPath === "/api/doi/friends/add" && req.method === "POST") {
+  if (urlPath === "/api/doi/friends/requests" && req.method === "GET") {
+    const tok = query.get("token") || "";
+    const u = doiUserFromToken(tok);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    const incoming = (doiStore.friendReqs[u.key] || []).map(r => ({ ...doiProfile(r.from), at: r.at }));
+    // outgoing = anyone whose friendReqs list contains u.key
+    const outgoing = [];
+    for (const receiverKey in doiStore.friendReqs) {
+      for (const r of (doiStore.friendReqs[receiverKey] || [])) {
+        if (r.from === u.key) outgoing.push({ ...doiProfile(receiverKey), at: r.at });
+      }
+    }
+    return sendJSON(res, { ok: true, incoming, outgoing });
+  }
+  // Send a friend request (or auto-accept if reciprocal already exists)
+  if ((urlPath === "/api/doi/friends/add" || urlPath === "/api/doi/friends/request") && req.method === "POST") {
     const m = await readBody(req);
     const u = doiUserFromToken(m.token);
     if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
@@ -708,11 +754,48 @@ async function handleApi(req, res, urlPath, query) {
     const targetKey = call.toLowerCase();
     if (targetKey === u.key) return sendJSON(res, { error: "cannot befriend yourself" }, 400);
     if (!accounts.users[targetKey]) return sendJSON(res, { error: "no such operative" }, 404);
-    // symmetric friendship
-    doiStore.friends[u.key]      = doiStore.friends[u.key]      || [];
-    doiStore.friends[targetKey]  = doiStore.friends[targetKey]  || [];
-    if (!doiStore.friends[u.key].includes(targetKey)) doiStore.friends[u.key].push(targetKey);
-    if (!doiStore.friends[targetKey].includes(u.key)) doiStore.friends[targetKey].push(u.key);
+    if (areFriends(u.key, targetKey)) return sendJSON(res, { error: "already friends" }, 400);
+    // Reciprocal request? auto-accept.
+    const myPending = doiStore.friendReqs[u.key] || [];
+    if (myPending.some(r => r.from === targetKey)) {
+      doiStore.friendReqs[u.key] = myPending.filter(r => r.from !== targetKey);
+      doiStore.friends[u.key]     = doiStore.friends[u.key]     || [];
+      doiStore.friends[targetKey] = doiStore.friends[targetKey] || [];
+      if (!doiStore.friends[u.key].includes(targetKey)) doiStore.friends[u.key].push(targetKey);
+      if (!doiStore.friends[targetKey].includes(u.key)) doiStore.friends[targetKey].push(u.key);
+      saveDoi();
+      return sendJSON(res, { ok: true, state: "friends" });
+    }
+    // Already sent?
+    const theirPending = doiStore.friendReqs[targetKey] || [];
+    if (theirPending.some(r => r.from === u.key)) return sendJSON(res, { error: "request already sent" }, 400);
+    doiStore.friendReqs[targetKey] = theirPending.concat({ from: u.key, at: Date.now() });
+    saveDoi();
+    return sendJSON(res, { ok: true, state: "outgoing" });
+  }
+  if (urlPath === "/api/doi/friends/accept" && req.method === "POST") {
+    const m = await readBody(req);
+    const u = doiUserFromToken(m.token);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    const fromKey = String(m.from || "").toLowerCase();
+    const pending = doiStore.friendReqs[u.key] || [];
+    if (!pending.some(r => r.from === fromKey)) return sendJSON(res, { error: "no such request" }, 404);
+    doiStore.friendReqs[u.key] = pending.filter(r => r.from !== fromKey);
+    doiStore.friends[u.key]    = doiStore.friends[u.key]    || [];
+    doiStore.friends[fromKey]  = doiStore.friends[fromKey]  || [];
+    if (!doiStore.friends[u.key].includes(fromKey))  doiStore.friends[u.key].push(fromKey);
+    if (!doiStore.friends[fromKey].includes(u.key))  doiStore.friends[fromKey].push(u.key);
+    saveDoi();
+    return sendJSON(res, { ok: true });
+  }
+  if (urlPath === "/api/doi/friends/decline" && req.method === "POST") {
+    // decline incoming OR cancel own outgoing
+    const m = await readBody(req);
+    const u = doiUserFromToken(m.token);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    const otherKey = String(m.from || m.to || "").toLowerCase();
+    if (doiStore.friendReqs[u.key])    doiStore.friendReqs[u.key]    = doiStore.friendReqs[u.key].filter(r => r.from !== otherKey);
+    if (doiStore.friendReqs[otherKey]) doiStore.friendReqs[otherKey] = doiStore.friendReqs[otherKey].filter(r => r.from !== u.key);
     saveDoi();
     return sendJSON(res, { ok: true });
   }
@@ -726,6 +809,61 @@ async function handleApi(req, res, urlPath, query) {
     if (doiStore.friends[targetKey]) doiStore.friends[targetKey] = doiStore.friends[targetKey].filter(k => k !== u.key);
     saveDoi();
     return sendJSON(res, { ok: true });
+  }
+
+  /* ---- direct messages ---- */
+  if (urlPath === "/api/doi/dms" && req.method === "GET") {
+    const tok = query.get("token") || "";
+    const u = doiUserFromToken(tok);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    const convos = [];
+    for (const pk in doiStore.dms) {
+      const parts = pk.split("|");
+      if (parts.includes(u.key)) {
+        const other = parts[0] === u.key ? parts[1] : parts[0];
+        const msgs = doiStore.dms[pk] || [];
+        const last = msgs[msgs.length - 1] || null;
+        convos.push({ other: doiProfile(other), lastTs: last ? last.ts : 0, lastText: last ? last.text : "" });
+      }
+    }
+    convos.sort((a, b) => b.lastTs - a.lastTs);
+    return sendJSON(res, { ok: true, dms: convos });
+  }
+  {
+    const mm = urlPath.match(/^\/api\/doi\/dms\/([^/]+)$/);
+    if (mm && req.method === "GET") {
+      const tok = query.get("token") || "";
+      const u = doiUserFromToken(tok);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const otherKey = mm[1].toLowerCase();
+      if (!accounts.users[otherKey]) return sendJSON(res, { error: "not found" }, 404);
+      const pk = dmPairKey(u.key, otherKey);
+      const since = parseInt(query.get("since") || "0", 10) || 0;
+      const all = doiStore.dms[pk] || [];
+      const msgs = since ? all.filter(x => x.ts > since) : all;
+      return sendJSON(res, { ok: true, other: doiProfile(otherKey), messages: msgs, now: Date.now() });
+    }
+    if (mm && req.method === "POST") {
+      const m = await readBody(req);
+      const u = doiUserFromToken(m.token);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const otherKey = mm[1].toLowerCase();
+      if (!accounts.users[otherKey]) return sendJSON(res, { error: "not found" }, 404);
+      // enforce message privacy of the RECEIVER
+      const otherProf = doiProfile(otherKey);
+      if (otherProf.messagePrivacy === "friends" && !areFriends(u.key, otherKey)) {
+        return sendJSON(res, { error: "This operative only accepts messages from friends." }, 403);
+      }
+      const text = String(m.text || "").trim().slice(0, 2000);
+      if (!text) return sendJSON(res, { error: "empty message" }, 400);
+      const pk = dmPairKey(u.key, otherKey);
+      doiStore.dms[pk] = doiStore.dms[pk] || [];
+      const post = { id: "d-" + crypto.randomBytes(5).toString("hex"), from: u.name, fromKey: u.key, ts: Date.now(), text };
+      doiStore.dms[pk].push(post);
+      if (doiStore.dms[pk].length > DOI_MSG_CAP) doiStore.dms[pk].splice(0, doiStore.dms[pk].length - DOI_MSG_CAP);
+      saveDoi();
+      return sendJSON(res, { ok: true, message: post });
+    }
   }
 
   return sendJSON(res, { error: "unknown endpoint" }, 404);

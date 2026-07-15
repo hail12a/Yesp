@@ -13,29 +13,37 @@
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
   const TOKEN_KEY = 'doi.token';
-  const LOGO_URL       = 'assets/img/doi-logo.png?v=20260715d';
-  const HERO_TEAM_URL  = 'assets/img/hero-team.png?v=20260715d';
-  const HERO_GATE_URL  = 'assets/img/hero-gate.png?v=20260715d';
+  const LOGO_URL       = 'assets/img/doi-logo.png?v=20260715e';
+  const HERO_TEAM_URL  = 'assets/img/hero-team.png?v=20260715e';
+  const HERO_GATE_URL  = 'assets/img/hero-gate.png?v=20260715e';
   window.DOI_LOGO_URL = LOGO_URL;
 
   /* ---------- CACHE ---------- */
   const cache = {
     token: localStorage.getItem(TOKEN_KEY) || null,
-    profile: null,                     // { name, tag, bio, avatar, isDOI }
+    profile: null,                     // { name, tag, bio, avatar, bannerColor, pronouns, messagePrivacy, isDOI }
     servers: null,                     // [brief]
     serversFull: {},                   // id -> full
     chat: {},                          // `${serverId}:${channelId}` -> messages
     chatSince: {},                     // same key -> ts
     friends: null,                     // list
+    friendReqs: { incoming: [], outgoing: [] },
+    dms: null,                         // conversation list
+    dmMessages: {},                    // otherKey -> messages
+    dmSince: {},                       // otherKey -> ts
     lastServersFetch: 0,
     lastFriendsFetch: 0,
+    lastReqsFetch: 0,
+    lastDMsFetch: 0,
   };
 
   /* ---------- STATE ---------- */
   const state = window.__doiHomeState = window.__doiHomeState || {
     server: 'home',                    // 'home' or serverId
     channel: null,                     // channelId within current server
-    friendTab: 'all',                  // 'all' | 'add'
+    homeView: 'friends',               // 'friends' | 'dm'
+    friendTab: 'all',                  // 'online' | 'all' | 'pending' | 'add'
+    dmWith: null,                      // userKey when homeView='dm'
   };
 
   /* ---------- API ---------- */
@@ -74,8 +82,17 @@
     sendChat:  (sid, cid, text)  => jfetch('/api/doi/servers/' + q(sid) + '/chat/' + q(cid), { method: 'POST', body: JSON.stringify({ token: cache.token, text }) }),
 
     friends:      () => jfetch('/api/doi/friends?token=' + q(cache.token || '')),
-    addFriend:    (callsign) => jfetch('/api/doi/friends/add',    { method: 'POST', body: JSON.stringify({ token: cache.token, callsign }) }),
-    removeFriend: (callsign) => jfetch('/api/doi/friends/remove', { method: 'POST', body: JSON.stringify({ token: cache.token, callsign }) }),
+    friendRequests: () => jfetch('/api/doi/friends/requests?token=' + q(cache.token || '')),
+    sendFriendReq:  (callsign) => jfetch('/api/doi/friends/request', { method: 'POST', body: JSON.stringify({ token: cache.token, callsign }) }),
+    acceptFriend:   (fromKey)  => jfetch('/api/doi/friends/accept',  { method: 'POST', body: JSON.stringify({ token: cache.token, from: fromKey }) }),
+    declineFriend:  (otherKey) => jfetch('/api/doi/friends/decline', { method: 'POST', body: JSON.stringify({ token: cache.token, from: otherKey, to: otherKey }) }),
+    removeFriend:   (callsign) => jfetch('/api/doi/friends/remove',  { method: 'POST', body: JSON.stringify({ token: cache.token, callsign }) }),
+
+    dms:            () => jfetch('/api/doi/dms?token=' + q(cache.token || '')),
+    dm:  (otherKey, since) => jfetch('/api/doi/dms/' + q(otherKey) + '?token=' + q(cache.token || '') + (since ? '&since=' + since : '')),
+    sendDM: (otherKey, text) => jfetch('/api/doi/dms/' + q(otherKey), { method: 'POST', body: JSON.stringify({ token: cache.token, text }) }),
+
+    publicProfile: (userKey) => jfetch('/api/doi/profile/' + q(userKey) + '?token=' + q(cache.token || '')),
   };
 
   /* ---------- HELPERS ---------- */
@@ -195,6 +212,16 @@
         } else if (!cache.chat[key]) {
           cache.chat[key] = r.messages || [];
         }
+      } else if (state.server === 'home' && state.homeView === 'dm' && state.dmWith) {
+        const otherKey = state.dmWith;
+        const since = cache.dmSince[otherKey] || 0;
+        const r = await api.dm(otherKey, since);
+        if (r.messages && r.messages.length) {
+          const prev = cache.dmMessages[otherKey] || [];
+          cache.dmMessages[otherKey] = since ? [...prev, ...r.messages] : r.messages;
+          cache.dmSince[otherKey] = cache.dmMessages[otherKey][cache.dmMessages[otherKey].length - 1].ts;
+          rerenderMainSoft();
+        }
       }
     } catch (_) { /* ignore transient network */ }
   }
@@ -229,13 +256,37 @@
       cache.lastFriendsFetch = Date.now();
     } catch (_) { cache.friends = cache.friends || []; }
   }
+  async function loadFriendRequests() {
+    try {
+      const r = await api.friendRequests();
+      cache.friendReqs = { incoming: r.incoming || [], outgoing: r.outgoing || [] };
+      cache.lastReqsFetch = Date.now();
+    } catch (_) { cache.friendReqs = cache.friendReqs || { incoming: [], outgoing: [] }; }
+  }
+  async function loadDMs() {
+    try {
+      const r = await api.dms();
+      cache.dms = r.dms || [];
+      cache.lastDMsFetch = Date.now();
+    } catch (_) { cache.dms = cache.dms || []; }
+  }
+  async function loadDMMessages(otherKey) {
+    try {
+      const r = await api.dm(otherKey);
+      cache.dmMessages[otherKey] = r.messages || [];
+      if (r.messages && r.messages.length) cache.dmSince[otherKey] = r.messages[r.messages.length - 1].ts;
+    } catch (_) { cache.dmMessages[otherKey] = cache.dmMessages[otherKey] || []; }
+  }
 
   /* Pre-load whatever's needed for the current view. Called once per navigation. */
   async function preload() {
     const jobs = [];
     if (!cache.servers || Date.now() - cache.lastServersFetch > 60_000) jobs.push(loadServers());
     if (state.server === 'home') {
-      if (!cache.friends || Date.now() - cache.lastFriendsFetch > 30_000) jobs.push(loadFriends());
+      if (!cache.friends   || Date.now() - cache.lastFriendsFetch > 30_000) jobs.push(loadFriends());
+      if (!cache.friendReqs || Date.now() - cache.lastReqsFetch    > 30_000) jobs.push(loadFriendRequests());
+      if (!cache.dms       || Date.now() - cache.lastDMsFetch     > 30_000) jobs.push(loadDMs());
+      if (state.homeView === 'dm' && state.dmWith && !cache.dmMessages[state.dmWith]) jobs.push(loadDMMessages(state.dmWith));
     } else {
       if (!cache.serversFull[state.server]) jobs.push(loadServer(state.server));
       if (state.channel) {
@@ -293,13 +344,26 @@
   function renderSidebar() {
     const p = cache.profile || { name:'…', tag:'#0000', bio:'' };
     if (state.server === 'home') {
+      const dms = cache.dms || [];
+      const reqCount = (cache.friendReqs.incoming || []).length;
       return `
-        <div class="doi-channels">
-          <div class="doi-guildhead"><span class="doi-dot"></span><span>Friends</span></div>
+        <div class="doi-channels doi-channels-home">
+          <div class="doi-home-search">
+            <input placeholder="Find or start a conversation" id="doi-dm-search"/>
+          </div>
           <div class="doi-chan-scroll">
-            <div class="doi-friend-tabs">
-              <button class="doi-friend-tab ${state.friendTab==='all'?'active':''}" data-friend-tab="all">Friends</button>
-              <button class="doi-friend-tab ${state.friendTab==='add'?'active':''}" data-friend-tab="add">Add friend</button>
+            <div class="doi-home-nav ${state.homeView==='friends'?'active':''}" data-shell-nav="home-friends">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span>Friends</span>
+              ${reqCount ? `<span class="doi-badge-count">${reqCount}</span>` : ''}
+            </div>
+            <div class="doi-catlabel doi-catlabel-dm">
+              <span>Direct Messages</span>
+              <button class="doi-catadd" data-shell-newdm title="New DM">+</button>
+            </div>
+            <div id="doi-dm-list">
+              ${dms.length ? dms.map(dmRow).join('')
+                : '<div class="doi-empty" style="padding:12px 8px;font-size:11px">no conversations yet</div>'}
             </div>
           </div>
           ${userPanel(p)}
@@ -345,16 +409,38 @@
       ${canDelete ? `<button class="doi-ch-del" data-del-channel="${esc(c.id)}" title="Delete channel">×</button>` : ''}
     </div>`;
   }
+  function dmRow(c) {
+    const other = c.other || {};
+    const active = state.homeView === 'dm' && state.dmWith === other.key;
+    return `<div class="doi-dm-row ${active?'active':''}" data-shell-nav="dm" data-dm-key="${esc(other.key)}">
+      ${avatarHTML(other.name, other.avatar, 32)}
+      <div class="doi-dm-info">
+        <div class="doi-dm-name">${esc(other.name)}</div>
+        ${c.lastText ? `<div class="doi-dm-last">${esc(c.lastText.slice(0, 34))}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
   function userPanel(p) {
     return `<div class="doi-userpanel">
-      ${avatarHTML(p.name, p.avatar, 36)}
-      <div class="doi-uinfo">
-        <div class="doi-uname">${esc(p.name)}${p.isDOI ? ' <span class="doi-badge-owner">OWNER</span>':''}</div>
-        <div class="doi-utag">${esc(p.tag)} · ${esc(p.bio || 'Insurgent')}</div>
+      <div class="doi-uleft" data-shell-openprofile data-pkey="${esc(p.key || (p.name||'').toLowerCase())}">
+        ${avatarHTML(p.name, p.avatar, 36)}
+        <div class="doi-uinfo">
+          <div class="doi-uname">${esc(p.name)}${p.isDOI ? ' <span class="doi-badge-owner">OWNER</span>':''}</div>
+          <div class="doi-utag doi-online-dot">Online</div>
+        </div>
       </div>
-      <button class="doi-uedit" data-shell-editprofile title="Customize profile">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4z"/></svg>
-      </button>
+      <div class="doi-uctrls">
+        <button class="doi-uctrl" data-shell-toggle-mute title="Mute (visual only)">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>
+        </button>
+        <button class="doi-uctrl" data-shell-toggle-deaf title="Deafen (visual only)">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
+        </button>
+        <button class="doi-uctrl" data-shell-opensettings title="User Settings">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
     </div>`;
   }
 
@@ -396,53 +482,110 @@
   }
 
   function renderMainHome() {
-    const p = cache.profile || {};
+    if (state.homeView === 'dm' && state.dmWith) return renderMainDM();
+    return renderMainFriends();
+  }
+
+  function renderMainFriends() {
     const tab = state.friendTab;
     const friends = cache.friends || [];
-    const head = `<span class="doi-hash">◈</span><h2>Home · Friends</h2>
-      <span class="doi-topic">${friends.length} friend${friends.length===1?'':'s'}</span>`;
-    let body;
+    const incoming = cache.friendReqs.incoming || [];
+    const outgoing = cache.friendReqs.outgoing || [];
+
+    const head = `<span class="doi-hash">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </span><h2>Friends</h2>
+      <div class="doi-friend-topbar">
+        <button class="doi-friend-tab ${tab==='all'?'active':''}"     data-friend-tab="all">All <b>${friends.length}</b></button>
+        <button class="doi-friend-tab ${tab==='online'?'active':''}"  data-friend-tab="online">Online <b>${friends.length}</b></button>
+        <button class="doi-friend-tab ${tab==='pending'?'active':''}" data-friend-tab="pending">Pending${incoming.length ? ` <span class="doi-badge-count">${incoming.length}</span>` : ''}</button>
+        <button class="doi-friend-tab doi-friend-tab-add ${tab==='add'?'active':''}" data-friend-tab="add">Add Friend</button>
+      </div>`;
+
+    let list;
     if (tab === 'add') {
-      body = `<div class="doi-main-body">
-        <div class="doi-sec-title">Add a friend</div>
-        <form id="doiAddFriend" style="display:flex;gap:10px;max-width:520px">
-          <input id="doiAddFriendInput" placeholder="operative callsign (e.g. Vector_7)" maxlength="16" pattern="[A-Za-z0-9_]{3,16}" style="flex:1;background:#131313;border:1px solid #2a2a2a;color:#ececec;padding:10px 12px;border-radius:2px;font-family:var(--mono);font-size:13px"/>
-          <button type="submit" class="doi-btn-primary" style="padding:10px 18px;border:1px solid #000">▸ Send</button>
-        </form>
-        <div id="doiAddFriendMsg" style="margin-top:10px;font-family:var(--mono);font-size:12px"></div>
-        <div class="doi-sec-title" style="margin-top:24px">Notes</div>
-        <p style="color:#8a8a8a;font-size:13px">Friends are symmetric. Both operatives immediately see each other in the roster.</p>
-      </div>`;
+      list = `
+        <div class="doi-add-friend-wrap">
+          <div class="doi-sec-title" style="margin-top:0">Add Friend</div>
+          <p style="color:#a0a0a0;font-size:14px;margin:0 0 10px">You can add friends with their DOI callsign.</p>
+          <form id="doiAddFriend" style="display:flex;gap:10px">
+            <input id="doiAddFriendInput" placeholder="You can add friends with their DOI callsign." maxlength="16" pattern="[A-Za-z0-9_]{3,16}"/>
+            <button type="submit" class="doi-btn-primary" style="padding:10px 18px">Send Friend Request</button>
+          </form>
+          <div id="doiAddFriendMsg"></div>
+        </div>`;
+    } else if (tab === 'pending') {
+      const inList  = incoming.map(f => pendingRow(f, 'incoming')).join('');
+      const outList = outgoing.map(f => pendingRow(f, 'outgoing')).join('');
+      list = `
+        ${incoming.length ? `<div class="doi-sec-title">Incoming · <b>${incoming.length}</b></div><div class="doi-friend-list">${inList}</div>` : ''}
+        ${outgoing.length ? `<div class="doi-sec-title" style="margin-top:20px">Outgoing · <b>${outgoing.length}</b></div><div class="doi-friend-list">${outList}</div>` : ''}
+        ${!incoming.length && !outgoing.length ? '<div class="doi-empty" style="text-align:left;padding:14px 0">no pending requests</div>' : ''}`;
     } else {
-      body = `<div class="doi-main-body">
-        <div class="doi-hero" style="min-height:180px">
-          <div class="doi-hero-img" style="background-image:url('${HERO_TEAM_URL}')"></div>
-          <div class="doi-hero-vign"></div>
-          <div class="doi-hero-inner">
-            <img class="doi-hero-mark" src="${LOGO_URL}"/>
-            <div class="doi-hero-txt">
-              <h1>${esc(p.name || 'Operative')}</h1>
-              <p>Welcome back to the DOI network</p>
-              <p class="doi-motto">${esc(p.bio || 'Dismantling Greed')}</p>
-            </div>
-          </div>
-        </div>
-        <div class="doi-sec-title">Friends · <b>${friends.length}</b></div>
-        ${friends.length ? `<div class="doi-friend-list">${friends.map(friendRow).join('')}</div>`
-          : `<div class="doi-empty" style="text-align:left;padding:14px 0">no friends yet — hit "Add friend" in the sidebar</div>`}
-      </div>`;
+      // 'all' or 'online' (we don't track online status yet — treat same as all)
+      list = friends.length
+        ? `<div class="doi-sec-title">All Friends · <b>${friends.length}</b></div><div class="doi-friend-list">${friends.map(friendRow).join('')}</div>`
+        : `<div class="doi-hero" style="min-height:120px"><div class="doi-hero-img" style="background-image:url('${HERO_TEAM_URL}')"></div><div class="doi-hero-vign"></div>
+            <div class="doi-hero-inner"><div class="doi-hero-txt"><h1>No friends yet</h1><p>Send a friend request from the "Add Friend" tab.</p></div></div></div>`;
     }
-    return `<div class="doi-main-head">${head}</div>${body}`;
+    return `<div class="doi-main-head">${head}</div><div class="doi-main-body">${list}</div>`;
   }
 
   function friendRow(f) {
+    return `<div class="doi-friend" data-open-profile="${esc(f.key || (f.name||'').toLowerCase())}">
+      ${avatarHTML(f.name, f.avatar, 40)}
+      <div class="doi-friend-info">
+        <div class="doi-friend-name">${esc(f.name)}</div>
+        <div class="doi-friend-tag">${esc(f.tag || '')} · ${esc(f.bio || 'Insurgent')}</div>
+      </div>
+      <div class="doi-friend-actions">
+        <button class="doi-friend-msg" data-dm-open="${esc(f.key || (f.name||'').toLowerCase())}" title="Message">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </button>
+        <button class="doi-friend-remove" data-remove-friend="${esc(f.name)}" title="Remove">×</button>
+      </div>
+    </div>`;
+  }
+
+  function pendingRow(f, dir) {
     return `<div class="doi-friend">
       ${avatarHTML(f.name, f.avatar, 40)}
       <div class="doi-friend-info">
         <div class="doi-friend-name">${esc(f.name)}</div>
-        <div class="doi-friend-tag">${esc(f.tag || '')} · ${esc(f.bio || '')}</div>
+        <div class="doi-friend-tag">${dir === 'incoming' ? 'incoming friend request' : 'outgoing · waiting'}</div>
       </div>
-      <button class="doi-friend-remove" data-remove-friend="${esc(f.name)}" title="Remove">×</button>
+      <div class="doi-friend-actions">
+        ${dir === 'incoming'
+          ? `<button class="doi-friend-msg" data-accept-friend="${esc(f.key)}" title="Accept">✓</button>
+             <button class="doi-friend-remove" data-decline-friend="${esc(f.key)}" title="Decline">×</button>`
+          : `<button class="doi-friend-remove" data-decline-friend="${esc(f.key)}" title="Cancel">×</button>`}
+      </div>
+    </div>`;
+  }
+
+  function renderMainDM() {
+    const otherKey = state.dmWith;
+    const otherProf = (cache.dms || []).find(c => c.other && c.other.key === otherKey);
+    const other = otherProf ? otherProf.other : { key: otherKey, name: otherKey, avatar: null, bio: '' };
+    const msgs = cache.dmMessages[otherKey] || [];
+    const head = `${avatarHTML(other.name, other.avatar, 24)}<h2 style="margin-left:8px">${esc(other.name)}</h2>
+      <button class="doi-topic doi-topic-btn" data-open-profile="${esc(otherKey)}">view profile</button>`;
+    const body = `<div class="doi-main-body" id="doi-msgs">
+      ${msgs.length ? msgs.map(dmMsgHTML).join('') : `<div class="doi-empty" style="padding:40px 20px">say hi to ${esc(other.name)}</div>`}
+    </div>${composerHTML(other.name, true)}`;
+    return `<div class="doi-main-head doi-main-head-dm">${head}</div>${body}`;
+  }
+
+  function dmMsgHTML(m) {
+    return `<div class="doi-msg">
+      ${avatarHTML(m.from, null, 40)}
+      <div class="doi-msg-body">
+        <div class="doi-msg-head">
+          <span class="doi-msg-name">${esc(m.from)}</span>
+          <span class="doi-msg-time">${timeAgo(m.ts)}</span>
+        </div>
+        <div class="doi-msg-text">${esc(m.text)}</div>
+      </div>
     </div>`;
   }
 
@@ -459,10 +602,11 @@
       </div>
     </div>`;
   }
-  function composerHTML(label) {
+  function composerHTML(label, isDM) {
+    const placeholder = isDM ? 'Message @' + esc(label || '') : 'Message #' + esc(label || 'channel');
     return `<div class="doi-composer">
-      <form data-composer>
-        <input type="text" placeholder="Message #${esc(label || 'channel')}" maxlength="2000" autocomplete="off"/>
+      <form data-composer data-dm="${isDM ? '1':''}">
+        <input type="text" placeholder="${placeholder}" maxlength="2000" autocomplete="off"/>
         <button type="submit">Send ▸</button>
       </form>
     </div>`;
@@ -471,25 +615,6 @@
   /* ---------- MODALS ---------- */
   function modalHTML() {
     return `
-      <div class="doi-modal" id="doiProfileModal" hidden><div class="doi-modal-inner">
-        <h3>▸ Customize Profile</h3>
-        <div class="doi-field"><label>Callsign</label>
-          <input type="text" value="${esc((cache.profile||{}).name||'')}" disabled/>
-          <div class="doi-hint">Callsign is locked to the account.</div>
-        </div>
-        <div class="doi-field"><label>Bio</label>
-          <input id="doiPfBio" type="text" maxlength="120" value="${esc((cache.profile||{}).bio||'')}"/>
-        </div>
-        <div class="doi-field"><label>Avatar (image, small!)</label>
-          <input id="doiPfAvatar" type="file" accept="image/*"/>
-          <div class="doi-hint">Max ~200KB. Stored on the server.</div>
-        </div>
-        <div class="doi-modal-actions">
-          <button class="doi-btn-cancel" data-close-modal>Cancel</button>
-          <button class="doi-btn-primary" data-submit-profile>▸ Save</button>
-        </div>
-      </div></div>
-
       <div class="doi-modal" id="doiNewServerModal" hidden><div class="doi-modal-inner">
         <h3>▸ New Server</h3>
         <div class="doi-tabs" style="margin-bottom:14px">
@@ -552,7 +677,245 @@
           <button class="doi-btn-cancel" data-close-modal>Cancel</button>
           <button class="doi-btn-primary" data-submit-newcategory>▸ Create</button>
         </div>
-      </div></div>`;
+      </div></div>
+
+      <div class="doi-modal doi-modal-popup" id="doiProfilePopup" hidden>
+        <div class="doi-modal-inner doi-pp-inner"></div>
+      </div>
+
+      <div class="doi-modal doi-modal-full" id="doiUserSettings" hidden></div>`;
+  }
+
+  async function openDM(otherKey) {
+    if (!otherKey) return;
+    state.server = 'home';
+    state.homeView = 'dm';
+    state.dmWith = otherKey;
+    await Promise.all([loadDMs(), loadDMMessages(otherKey)]);
+    rerenderShell();
+    startPoll();
+  }
+
+  async function openProfilePopup(userKey) {
+    if (!userKey) return;
+    const modal = document.getElementById('doiProfilePopup');
+    if (!modal) return;
+    const inner = modal.querySelector('.doi-modal-inner');
+    inner.innerHTML = `<div class="doi-empty" style="padding:60px 20px">loading…</div>`;
+    modal.hidden = false;
+    let prof, friendState;
+    try {
+      const r = await api.publicProfile(userKey);
+      prof = r.profile; friendState = r.friendState;
+    } catch (e) {
+      inner.innerHTML = `<div class="doi-empty" style="padding:40px 20px">${esc(e.message)}</div>
+        <div class="doi-modal-actions"><button class="doi-btn-cancel" data-close-modal>Close</button></div>`;
+      inner.querySelector('[data-close-modal]').addEventListener('click', () => modal.hidden = true);
+      return;
+    }
+    const canDM = friendState === 'self' || friendState === 'friends' || prof.messagePrivacy === 'anyone';
+    const actions = friendState === 'self'
+      ? `<button class="doi-pp-btn doi-btn-primary" data-shell-opensettings>Edit Profile</button>`
+      : `${canDM ? `<button class="doi-pp-btn doi-btn-primary" data-pp-dm="${esc(prof.key)}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-3px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> Message</button>`
+                 : `<button class="doi-pp-btn doi-btn-primary" disabled title="This operative only accepts messages from friends">Messages closed</button>`}
+        ${friendState === 'friends' ? `<button class="doi-pp-btn doi-btn-cancel" data-pp-remove="${esc(prof.name)}">Remove Friend</button>`
+          : friendState === 'outgoing' ? `<button class="doi-pp-btn doi-btn-cancel" data-pp-cancel="${esc(prof.key)}">Cancel Request</button>`
+          : friendState === 'incoming' ? `<button class="doi-pp-btn doi-btn-primary" data-pp-accept="${esc(prof.key)}">Accept Request</button>
+                                          <button class="doi-pp-btn doi-btn-cancel" data-pp-cancel="${esc(prof.key)}">Decline</button>`
+          : `<button class="doi-pp-btn doi-btn-primary" data-pp-add="${esc(prof.name)}">Send Friend Request</button>`}`;
+    inner.innerHTML = `
+      <div class="doi-pp">
+        <div class="doi-pp-banner" style="background:${esc(prof.bannerColor)}"></div>
+        <div class="doi-pp-avatarwrap">${avatarHTML(prof.name, prof.avatar, 96)}
+          <span class="doi-pp-online"></span>
+        </div>
+        <div class="doi-pp-body">
+          <h2 class="doi-pp-name">${esc(prof.name)}${prof.isDOI ? ' <span class="doi-badge-owner">OWNER</span>':''}</h2>
+          <div class="doi-pp-sub">${esc(prof.name)} ${prof.pronouns ? '· ' + esc(prof.pronouns) : ''}</div>
+          <div class="doi-pp-tag">${esc(prof.tag)}</div>
+          <div class="doi-pp-actions">${actions}</div>
+          ${prof.bio ? `<div class="doi-pp-sec">About Me</div><div class="doi-pp-bio">${esc(prof.bio)}</div>` : ''}
+          <div class="doi-pp-sec">Member Since</div>
+          <div class="doi-pp-mem">${new Date(prof.joined).toLocaleDateString(undefined, {year:'numeric',month:'long',day:'numeric'})}</div>
+        </div>
+      </div>
+      <div class="doi-modal-actions"><button class="doi-btn-cancel" data-close-modal>Close</button></div>`;
+    inner.querySelector('[data-close-modal]').addEventListener('click', () => modal.hidden = true);
+    inner.querySelector('[data-pp-dm]')?.addEventListener('click', async () => { modal.hidden = true; await openDM(prof.key); });
+    inner.querySelector('[data-pp-add]')?.addEventListener('click', async e => {
+      try { await api.sendFriendReq(e.target.dataset.ppAdd); await Promise.all([loadFriends(), loadFriendRequests()]); openProfilePopup(userKey); }
+      catch (er) { alert(er.message); }
+    });
+    inner.querySelector('[data-pp-accept]')?.addEventListener('click', async e => {
+      try { await api.acceptFriend(e.target.dataset.ppAccept); await Promise.all([loadFriends(), loadFriendRequests()]); openProfilePopup(userKey); }
+      catch (er) { alert(er.message); }
+    });
+    inner.querySelector('[data-pp-cancel]')?.addEventListener('click', async e => {
+      try { await api.declineFriend(e.target.dataset.ppCancel); await loadFriendRequests(); openProfilePopup(userKey); }
+      catch (er) { alert(er.message); }
+    });
+    inner.querySelector('[data-pp-remove]')?.addEventListener('click', async e => {
+      if (!confirm('Remove ' + e.target.dataset.ppRemove + ' as a friend?')) return;
+      try { await api.removeFriend(e.target.dataset.ppRemove); await Promise.all([loadFriends(), loadFriendRequests()]); openProfilePopup(userKey); }
+      catch (er) { alert(er.message); }
+    });
+    inner.querySelector('[data-shell-opensettings]')?.addEventListener('click', () => { modal.hidden = true; openSettings(); });
+  }
+
+  /* ---------- SETTINGS MODAL ---------- */
+  function openSettings(section = 'account') {
+    const modal = document.getElementById('doiUserSettings');
+    if (!modal) return;
+    renderSettings(section);
+    modal.hidden = false;
+  }
+  function renderSettings(section) {
+    const modal = document.getElementById('doiUserSettings');
+    const p = cache.profile || {};
+    const sections = {
+      account:    'My Account',
+      profile:    'Profiles',
+      privacy:    'Privacy & Safety',
+      appearance: 'Appearance',
+      about:      'About DOI'
+    };
+    const catList = Object.entries(sections).map(([k,l]) =>
+      `<button class="doi-us-cat ${section===k?'active':''}" data-us-cat="${k}">${esc(l)}</button>`).join('');
+    let body = '';
+    if (section === 'account') {
+      body = `
+        <h2>My Account</h2>
+        <div class="doi-us-card">
+          <div class="doi-us-banner" style="background:${esc(p.bannerColor||'#5865f2')}"></div>
+          <div class="doi-us-account">
+            ${avatarHTML(p.name, p.avatar, 80)}
+            <div>
+              <div class="doi-us-uname">${esc(p.name||'')}${p.isDOI ? ' <span class="doi-badge-owner">OWNER</span>':''}</div>
+              <div class="doi-us-utag">${esc(p.tag||'')}</div>
+            </div>
+          </div>
+          <div class="doi-us-fields">
+            <div class="doi-us-field"><label>CALLSIGN</label><div class="doi-us-val">${esc(p.name||'')}</div><div class="doi-us-hint">Fixed to your account.</div></div>
+            <div class="doi-us-field"><label>TAG</label><div class="doi-us-val">${esc(p.tag||'')}</div></div>
+          </div>
+          <div class="doi-us-danger">
+            <button class="doi-btn-danger" data-us-signout>Log Out</button>
+          </div>
+        </div>`;
+    } else if (section === 'profile') {
+      body = `
+        <h2>Profiles</h2>
+        <form id="doiUSProfileForm">
+          <div class="doi-us-field"><label>BIO</label>
+            <textarea id="doiUSBio" maxlength="200" style="height:80px">${esc(p.bio||'')}</textarea>
+          </div>
+          <div class="doi-us-field"><label>PRONOUNS</label>
+            <input id="doiUSPronouns" maxlength="20" value="${esc(p.pronouns||'')}" placeholder="e.g. they/them"/>
+          </div>
+          <div class="doi-us-field"><label>BANNER COLOR</label>
+            <input id="doiUSBanner" type="color" value="${esc((p.bannerColor||'#5865f2').slice(0,7))}"/>
+            <div class="doi-us-hint">Shown at the top of your profile card.</div>
+          </div>
+          <div class="doi-us-field"><label>AVATAR</label>
+            <input id="doiUSAvatar" type="file" accept="image/*"/>
+            <div class="doi-us-hint">Max ~200KB. Stored on the server.</div>
+          </div>
+          <div class="doi-us-actions">
+            <button type="button" class="doi-btn-primary" id="doiUSSave">Save Changes</button>
+          </div>
+        </form>
+        <h3 style="margin-top:24px">Preview</h3>
+        <div class="doi-us-preview">
+          <div class="doi-pp-banner" style="background:${esc(p.bannerColor||'#5865f2')};height:80px;border-radius:6px 6px 0 0"></div>
+          <div style="display:flex;gap:14px;padding:14px 16px;align-items:flex-start;background:#0d0d0d;border-radius:0 0 6px 6px">
+            ${avatarHTML(p.name, p.avatar, 60)}
+            <div>
+              <div style="font-family:var(--mono);font-weight:800;color:#fff">${esc(p.name||'')}</div>
+              <div style="font-family:var(--mono);color:#a0a0a0;font-size:12px">${esc(p.pronouns||'')}</div>
+              <div style="color:#c0c0c0;font-size:13px;margin-top:6px">${esc(p.bio||'')}</div>
+            </div>
+          </div>
+        </div>`;
+    } else if (section === 'privacy') {
+      body = `
+        <h2>Privacy & Safety</h2>
+        <div class="doi-us-field"><label>DIRECT MESSAGES</label>
+          <div class="doi-us-radio">
+            <label><input type="radio" name="msgprivacy" value="anyone" ${(p.messagePrivacy||'anyone')==='anyone'?'checked':''}/> Anyone can send me a direct message</label>
+            <label><input type="radio" name="msgprivacy" value="friends" ${p.messagePrivacy==='friends'?'checked':''}/> Only my friends can DM me</label>
+          </div>
+          <div class="doi-us-hint">When set to friends-only, non-friend messages are rejected.</div>
+        </div>
+        <div class="doi-us-actions">
+          <button type="button" class="doi-btn-primary" id="doiUSPrivacySave">Save Changes</button>
+        </div>`;
+    } else if (section === 'appearance') {
+      body = `
+        <h2>Appearance</h2>
+        <p style="color:#a0a0a0">Theme is CI-dark by default. Toggle light/dark from the topbar's ☀/🌙 button.</p>
+        <p style="color:#a0a0a0">More appearance controls will land here.</p>`;
+    } else {
+      body = `
+        <h2>About DOI</h2>
+        <p style="color:#c0c0c0"><b>Department of Insurgency</b> — Site-CI Terminal</p>
+        <p style="color:#a0a0a0;font-size:13px">Server: same-origin Node process on Sparkedhost.</p>
+        <p style="color:#a0a0a0;font-size:13px">Client build: 20260715e</p>
+        <p style="color:#a0a0a0;font-size:13px">Motto: Dismantling Greed</p>`;
+    }
+    modal.innerHTML = `
+      <div class="doi-us-shell">
+        <div class="doi-us-nav">
+          <div class="doi-us-navhead">
+            ${avatarHTML(p.name, p.avatar, 32)}
+            <div>
+              <div class="doi-us-navname">${esc(p.name||'')}</div>
+              <div class="doi-us-navtag">${esc(p.tag||'')}</div>
+            </div>
+          </div>
+          ${catList}
+        </div>
+        <div class="doi-us-content">
+          ${body}
+        </div>
+        <button class="doi-us-close" data-close-modal title="Close (ESC)">×</button>
+      </div>`;
+    modal.querySelector('[data-close-modal]').addEventListener('click', () => modal.hidden = true);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.hidden = true; }, { once: true });
+    $$('[data-us-cat]', modal).forEach(b => b.addEventListener('click', () => renderSettings(b.dataset.usCat)));
+    // Section wiring
+    if (section === 'account') {
+      modal.querySelector('[data-us-signout]')?.addEventListener('click', () => {
+        modal.hidden = true; signOut();
+      });
+    }
+    if (section === 'profile') {
+      modal.querySelector('#doiUSSave')?.addEventListener('click', async () => {
+        const bio       = modal.querySelector('#doiUSBio').value;
+        const pronouns  = modal.querySelector('#doiUSPronouns').value;
+        const bannerColor = modal.querySelector('#doiUSBanner').value;
+        const file      = modal.querySelector('#doiUSAvatar').files[0];
+        const send = async (avatar) => {
+          try {
+            const r = await api.saveProfile({ bio, pronouns, bannerColor, ...(avatar !== undefined ? { avatar } : {}) });
+            cache.profile = r.profile;
+            renderSettings('profile');
+            // reflect in shell
+            rerenderShell();
+          } catch (e) { alert('Save failed: ' + e.message); }
+        };
+        if (file) {
+          if (file.size > 200_000) return alert('Avatar too big — under 200KB.');
+          const rd = new FileReader(); rd.onload = () => send(String(rd.result)); rd.readAsDataURL(file);
+        } else send(undefined);
+      });
+    }
+    if (section === 'privacy') {
+      modal.querySelector('#doiUSPrivacySave')?.addEventListener('click', async () => {
+        const val = modal.querySelector('input[name="msgprivacy"]:checked').value;
+        try { const r = await api.saveProfile({ messagePrivacy: val }); cache.profile = r.profile; renderSettings('privacy'); }
+        catch (e) { alert('Save failed: ' + e.message); }
+      });
+    }
   }
 
   function openServerSettings() {
@@ -677,7 +1040,7 @@
 
   /* ---------- WIRING ---------- */
   function wireMainOnly(container) {
-    // composer
+    // composer (channel or DM)
     const form = container.querySelector('[data-composer]');
     if (form && !form.dataset.wired) {
       form.dataset.wired = '1';
@@ -685,14 +1048,24 @@
         e.preventDefault();
         const input = form.querySelector('input');
         const text = input.value.trim();
-        if (!text || state.server === 'home' || !state.channel) return;
+        if (!text) return;
         input.disabled = true;
         try {
-          const r = await api.sendChat(state.server, state.channel, text);
-          const key = state.server + ':' + state.channel;
-          const list = cache.chat[key] || (cache.chat[key] = []);
-          list.push(r.message);
-          cache.chatSince[key] = r.message.ts;
+          if (form.dataset.dm) {
+            const otherKey = state.dmWith;
+            if (!otherKey) return;
+            const r = await api.sendDM(otherKey, text);
+            const list = cache.dmMessages[otherKey] || (cache.dmMessages[otherKey] = []);
+            list.push(r.message);
+            cache.dmSince[otherKey] = r.message.ts;
+          } else {
+            if (state.server === 'home' || !state.channel) return;
+            const r = await api.sendChat(state.server, state.channel, text);
+            const key = state.server + ':' + state.channel;
+            const list = cache.chat[key] || (cache.chat[key] = []);
+            list.push(r.message);
+            cache.chatSince[key] = r.message.ts;
+          }
           input.value = '';
           rerenderMainSoft();
         } catch (e2) {
@@ -700,7 +1073,7 @@
         } finally { input.disabled = false; input.focus(); }
       });
     }
-    // add-friend
+    // send friend request
     const addF = container.querySelector('#doiAddFriend');
     if (addF && !addF.dataset.wired) {
       addF.dataset.wired = '1';
@@ -709,36 +1082,81 @@
         const inp = container.querySelector('#doiAddFriendInput');
         const msg = container.querySelector('#doiAddFriendMsg');
         const call = inp.value.trim();
-        if (!/^[A-Za-z0-9_]{3,16}$/.test(call)) { msg.textContent = 'invalid callsign'; msg.style.color = '#ff5566'; return; }
+        if (!/^[A-Za-z0-9_]{3,16}$/.test(call)) { msg.innerHTML = '<span class="doi-hint-err">invalid callsign</span>'; return; }
         try {
-          await api.addFriend(call);
-          msg.textContent = '✓ ' + call + ' added'; msg.style.color = '#4dd867';
+          const r = await api.sendFriendReq(call);
+          if (r.state === 'friends') msg.innerHTML = '<span class="doi-hint-ok">✓ You and ' + esc(call) + ' are now friends!</span>';
+          else                        msg.innerHTML = '<span class="doi-hint-ok">✓ Friend request sent to ' + esc(call) + '</span>';
           inp.value = '';
-          await loadFriends();
+          await Promise.all([loadFriends(), loadFriendRequests()]);
         } catch (e2) {
-          msg.textContent = e2.message; msg.style.color = '#ff5566';
+          msg.innerHTML = '<span class="doi-hint-err">' + esc(e2.message) + '</span>';
         }
       });
     }
     // remove friend
     $$('[data-remove-friend]', container).forEach(b => {
       if (b.dataset.wired) return; b.dataset.wired = '1';
-      b.addEventListener('click', async () => {
+      b.addEventListener('click', async e => {
+        e.stopPropagation();
         if (!confirm('Remove ' + b.dataset.removeFriend + '?')) return;
-        try { await api.removeFriend(b.dataset.removeFriend); await loadFriends(); rerenderMainSoft(); }
-        catch (e) { alert('Remove failed: ' + e.message); }
+        try { await api.removeFriend(b.dataset.removeFriend); await Promise.all([loadFriends(), loadFriendRequests()]); rerenderMainSoft(); }
+        catch (e2) { alert('Remove failed: ' + e2.message); }
+      });
+    });
+    // accept friend
+    $$('[data-accept-friend]', container).forEach(b => {
+      if (b.dataset.wired) return; b.dataset.wired = '1';
+      b.addEventListener('click', async e => {
+        e.stopPropagation();
+        try { await api.acceptFriend(b.dataset.acceptFriend); await Promise.all([loadFriends(), loadFriendRequests()]); rerenderShell(); }
+        catch (e2) { alert('Accept failed: ' + e2.message); }
+      });
+    });
+    // decline friend
+    $$('[data-decline-friend]', container).forEach(b => {
+      if (b.dataset.wired) return; b.dataset.wired = '1';
+      b.addEventListener('click', async e => {
+        e.stopPropagation();
+        try { await api.declineFriend(b.dataset.declineFriend); await loadFriendRequests(); rerenderMainSoft(); }
+        catch (e2) { alert('Decline failed: ' + e2.message); }
+      });
+    });
+    // open profile popup
+    $$('[data-open-profile]', container).forEach(el => {
+      if (el.dataset.wired) return; el.dataset.wired = '1';
+      el.addEventListener('click', e => {
+        e.stopPropagation();
+        openProfilePopup(el.dataset.openProfile);
+      });
+    });
+    // DM open from friend row
+    $$('[data-dm-open]', container).forEach(b => {
+      if (b.dataset.wired) return; b.dataset.wired = '1';
+      b.addEventListener('click', async e => {
+        e.stopPropagation();
+        await openDM(b.dataset.dmOpen);
       });
     });
   }
 
   function wire(container) {
-    // navigation: home | server | channel
+    // navigation: home | server | channel | home-friends | dm
     $$('[data-shell-nav]', container).forEach(el => el.addEventListener('click', async () => {
       const t = el.dataset.shellNav;
-      if (t === 'home') { state.server = 'home'; state.channel = null; }
+      if (t === 'home') {
+        state.server = 'home'; state.channel = null; state.homeView = 'friends';
+        await Promise.all([loadFriends(), loadFriendRequests(), loadDMs()]);
+      }
+      else if (t === 'home-friends') {
+        state.homeView = 'friends';
+      }
+      else if (t === 'dm') {
+        state.homeView = 'dm'; state.dmWith = el.dataset.dmKey;
+        await loadDMMessages(state.dmWith);
+      }
       else if (t === 'server') {
         state.server = el.dataset.sid; state.channel = null;
-        // load the full server; then auto-select the first channel
         const s = await loadServer(state.server);
         if (s && s.channels && s.channels.length) state.channel = s.channels[0].id;
         if (s && state.channel) await loadChat(state.server, state.channel);
@@ -751,10 +1169,27 @@
       startPoll();
     }));
 
-    // friend tabs
+    // friend tabs (sub-navigation within home > friends)
     $$('[data-friend-tab]', container).forEach(b => b.addEventListener('click', () => {
+      state.homeView = 'friends';
       state.friendTab = b.dataset.friendTab;
-      rerenderShell();
+      rerenderMainSoft();
+    }));
+
+    // new DM prompt
+    $$('[data-shell-newdm]', container).forEach(el => el.addEventListener('click', async () => {
+      const call = prompt('Callsign of the operative to message:');
+      if (!call) return;
+      await openDM(call.toLowerCase());
+    }));
+
+    // user-panel controls (mute/deafen are visual state only; settings opens modal)
+    $$('[data-shell-toggle-mute]', container).forEach(b => b.addEventListener('click', () => b.classList.toggle('active')));
+    $$('[data-shell-toggle-deaf]', container).forEach(b => b.addEventListener('click', () => b.classList.toggle('active')));
+    $$('[data-shell-opensettings]', container).forEach(b => b.addEventListener('click', openSettings));
+    $$('[data-shell-openprofile]', container).forEach(el => el.addEventListener('click', e => {
+      e.stopPropagation();
+      openProfilePopup(el.dataset.pkey);
     }));
 
     // new server modal
@@ -868,32 +1303,6 @@
         rerenderShell();
       } catch (e2) { alert('Delete failed: ' + e2.message); }
     }));
-
-    // profile modal
-    $$('[data-shell-editprofile]', container).forEach(el => el.addEventListener('click', () => {
-      $('#doiProfileModal').hidden = false;
-    }));
-    const btnP = container.querySelector('[data-submit-profile]');
-    if (btnP) btnP.addEventListener('click', async () => {
-      const bio = $('#doiPfBio').value.trim();
-      const file = $('#doiPfAvatar').files[0];
-      const send = async (avatar) => {
-        btnP.disabled = true;
-        try {
-          const r = await api.saveProfile({ bio, ...(avatar !== undefined ? { avatar } : {}) });
-          cache.profile = r.profile;
-          $('#doiProfileModal').hidden = true;
-          rerenderShell();
-        } catch (e) { alert('Save failed: ' + e.message); }
-        finally { btnP.disabled = false; }
-      };
-      if (file) {
-        if (file.size > 200_000) return alert('Avatar too big — under 200KB.');
-        const rd = new FileReader();
-        rd.onload = () => send(String(rd.result));
-        rd.readAsDataURL(file);
-      } else send(undefined);
-    });
 
     // sign out
     const so = container.querySelector('[data-shell-signout]');
