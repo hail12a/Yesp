@@ -1,6 +1,6 @@
 /* =========================================================
    doi.js — Department of Insurgency
-   Auth gate, profile store, forums, chat, Discord-style shell
+   Auth, profile, forums, chat via the server (same-origin API)
    ========================================================= */
 (function () {
   'use strict';
@@ -11,155 +11,82 @@
   const esc = s => String(s).replace(/[&<>"']/g, c =>
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
-  /* ---------- STORE (localStorage) ---------- */
-  const PROFILE_KEY = 'doi.profile';
-  const FORUM_KEY   = 'doi.forums';
-  const CHAT_KEY    = 'doi.chat';
-  const AUTH_KEY    = 'doi.auth';
+  const TOKEN_KEY = 'doi.token';
 
-  const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (_) { return d; } };
-  const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} };
-
-  const DOI_BADGE_SVG = `
-    <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="100" cy="100" r="98" fill="#0a0a0a" stroke="#c8102e" stroke-width="4"/>
-      <circle cx="100" cy="100" r="86" fill="none" stroke="#c8102e" stroke-width="2"/>
-      <path id="doi-top" d="M 22,100 A 78,78 0 0 1 178,100" fill="none"/>
-      <path id="doi-bot" d="M 22,100 A 78,78 0 0 0 178,100" fill="none"/>
-      <text fill="#fff" font-family="monospace" font-weight="800" font-size="12" letter-spacing="2">
-        <textPath href="#doi-top" startOffset="50%" text-anchor="middle">DEPARTMENT · OF · INSURGENCY</textPath>
-      </text>
-      <text fill="#fff" font-family="monospace" font-weight="800" font-size="10" letter-spacing="2">
-        <textPath href="#doi-bot" startOffset="50%" text-anchor="middle">DISMANTLING · GREED</textPath>
-      </text>
-      <circle cx="100" cy="100" r="46" fill="#111" stroke="#2a2a2a" stroke-width="1"/>
-      <g stroke="#666" stroke-width="1">
-        <line x1="100" y1="56" x2="100" y2="62"/>
-        <line x1="100" y1="138" x2="100" y2="144"/>
-        <line x1="56" y1="100" x2="62" y2="100"/>
-        <line x1="138" y1="100" x2="144" y2="100"/>
-        <line x1="69" y1="69" x2="73" y2="73"/>
-        <line x1="127" y1="127" x2="131" y2="131"/>
-        <line x1="131" y1="69" x2="127" y2="73"/>
-        <line x1="73" y1="127" x2="69" y2="131"/>
-      </g>
-      <g stroke="#0a0a0a" stroke-width="1.5" fill="#3a3a3a">
-        <circle cx="100" cy="100" r="30"/>
-        <path d="M100 70 L106 82 L100 80 L94 82 Z M100 130 L94 118 L100 120 L106 118 Z M70 100 L82 94 L80 100 L82 106 Z M130 100 L118 106 L120 100 L118 94 Z" fill="#1a1a1a"/>
-      </g>
-      <circle cx="100" cy="100" r="8" fill="#c8102e"/>
-      <g stroke="#c8102e" stroke-width="1.5" fill="none" opacity=".9">
-        <path d="M 100 100 L 82 82"/><path d="M 100 100 L 118 82"/>
-        <path d="M 100 100 L 82 118"/><path d="M 100 100 L 118 118"/>
-      </g>
-    </svg>`;
-
-  window.DOI_BADGE_SVG = DOI_BADGE_SVG;
-
-  const DEFAULT_MEMBERS = [
-    { id:'m-doi', name:'DOI', officer: true, status:'operator', online:true },
-    { id:'m-cmdr', name:'Cmdr. Ash', officer: true, status:'briefing', online:true },
-    { id:'m-nine', name:'Ninetails', status:'field', online:true },
-    { id:'m-halo', name:'Halo-6', status:'listening', online:true },
-    { id:'m-vector', name:'Vector', status:'idle', online:true },
-    { id:'m-recon', name:'Recon-04', status:'offline', online:false },
-    { id:'m-echo', name:'Echo', status:'offline', online:false }
-  ];
-
-  const DEFAULT_FORUMS = () => ([
-    { id:'t-welcome', title:'Field Manual · Welcome, Insurgent', author:'DOI', ts: 1704067200000,
-      messages:[{ id:'m1', author:'DOI', ts: 1704067200000,
-        text:'Welcome to the Department of Insurgency network. This is a secure forum. Introduce yourself, and remember — dismantling greed is the mission.' }] },
-    { id:'t-ops',     title:'Ops Briefing · Report a target', author:'DOI', ts: 1704067200000,
-      messages:[{ id:'m1', author:'DOI', ts: 1704067200000,
-        text:'Post confirmed targets, sightings, and intel here. Include location, source, and confidence.' }] }
-  ]);
-
-  const DEFAULT_CHAT = () => ({
-    'general':   [{ id:'c1', author:'DOI', ts: 1704067200000, text:'DOI network online. Speak freely.' }],
-    'ops':       [{ id:'c1', author:'DOI', ts: 1704067200000, text:'Ops channel is open. Keep it professional.' }],
-    'blackline': [{ id:'c1', author:'DOI', ts: 1704067200000, text:'BLACKLINE — restricted channel. Anti-greed operations only.' }]
-  });
-
-  const store = {
-    getProfile() { return load(PROFILE_KEY, null); },
-    setProfile(p) { save(PROFILE_KEY, p); },
-
-    getForums() {
-      let f = load(FORUM_KEY, null);
-      if (!f) { f = DEFAULT_FORUMS(); save(FORUM_KEY, f); }
-      return f;
-    },
-    saveForums(f) { save(FORUM_KEY, f); },
-    addThread(title, body) {
-      const p = store.getProfile();
-      const f = store.getForums();
-      const t = {
-        id: 't-' + Date.now().toString(36),
-        title: title.trim(),
-        author: p ? p.name : 'anon',
-        ts: Date.now(),
-        messages: body ? [{ id:'m1', author: p ? p.name : 'anon', ts: Date.now(), text: body.trim() }] : []
-      };
-      f.unshift(t);
-      store.saveForums(f);
-      return t;
-    },
-    getThread(id) { return store.getForums().find(t => t.id === id); },
-    addThreadMsg(id, text) {
-      const p = store.getProfile();
-      const f = store.getForums();
-      const t = f.find(x => x.id === id);
-      if (!t) return null;
-      const m = { id: 'm-' + Date.now().toString(36), author: p ? p.name : 'anon', ts: Date.now(), text: text.trim() };
-      t.messages.push(m);
-      store.saveForums(f);
-      return m;
-    },
-
-    getChat() {
-      let c = load(CHAT_KEY, null);
-      if (!c) { c = DEFAULT_CHAT(); save(CHAT_KEY, c); }
-      return c;
-    },
-    addChatMsg(channel, text) {
-      const p = store.getProfile();
-      const c = store.getChat();
-      if (!c[channel]) c[channel] = [];
-      const m = { id: 'c-' + Date.now().toString(36), author: p ? p.name : 'anon', ts: Date.now(), text: text.trim() };
-      c[channel].push(m);
-      save(CHAT_KEY, c);
-      return m;
-    },
-
-    isAuthed() { return !!load(AUTH_KEY, false) && !!store.getProfile(); },
-    authIn(name) {
-      const existing = store.getProfile();
-      const p = existing && existing.name === name ? existing : {
-        name, tag: '#' + String(Math.floor(1000 + Math.random() * 9000)),
-        bio: 'Insurgent',
-        avatar: null, // dataURL if uploaded
-        joined: Date.now()
-      };
-      store.setProfile(p);
-      save(AUTH_KEY, true);
-      return p;
-    },
-    signOut() { save(AUTH_KEY, false); }
+  /* ---------- CACHE (in-memory) ---------- */
+  const cache = {
+    token: localStorage.getItem(TOKEN_KEY) || null,
+    profile: null,                 // { name, tag, bio, avatar, joined }
+    forums: null,                  // array
+    threads: {},                   // id -> full thread
+    chat: {},                      // channel -> array
+    chatSince: {},                 // channel -> last ts seen
+    members: { online: [], offline: [] },
+    fetchedForums: 0,
+    fetchedMembers: 0,
   };
 
-  window.DOI = { store, DEFAULT_MEMBERS };
+  /* ---------- API ---------- */
+  async function jfetch(url, opts = {}) {
+    const r = await fetch(url, { cache: 'no-store', ...opts,
+      headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) }
+    });
+    let body = null;
+    try { body = await r.json(); } catch (_) {}
+    if (!r.ok) {
+      const err = new Error((body && body.error) || ('HTTP ' + r.status));
+      err.status = r.status; err.body = body;
+      throw err;
+    }
+    return body || {};
+  }
 
-  /* ---------- LOGIN GATE ---------- */
+  const api = {
+    register: (user, pass) =>
+      jfetch('/api/register', { method: 'POST', body: JSON.stringify({ user, pass }) }),
+    login: (user, pass) =>
+      jfetch('/api/login', { method: 'POST', body: JSON.stringify({ user, pass }) }),
+    me: () =>
+      jfetch('/api/doi/me?token=' + encodeURIComponent(cache.token || '')),
+    saveProfile: (patch) =>
+      jfetch('/api/doi/me', { method: 'POST', body: JSON.stringify({ token: cache.token, ...patch }) }),
+    members: () => jfetch('/api/doi/members'),
+    heartbeat: () =>
+      jfetch('/api/doi/heartbeat', { method: 'POST', body: JSON.stringify({ token: cache.token }) }),
+    forums: () => jfetch('/api/doi/forums'),
+    thread: (id) => jfetch('/api/doi/forums/' + encodeURIComponent(id)),
+    newThread: (title, body) =>
+      jfetch('/api/doi/forums', { method: 'POST', body: JSON.stringify({ token: cache.token, title, body }) }),
+    postThread: (id, text) =>
+      jfetch('/api/doi/forums/' + encodeURIComponent(id) + '/msg', {
+        method: 'POST', body: JSON.stringify({ token: cache.token, text })
+      }),
+    chat: (ch, since) =>
+      jfetch('/api/doi/chat/' + encodeURIComponent(ch) + (since ? '?since=' + since : '')),
+    sendChat: (ch, text) =>
+      jfetch('/api/doi/chat/' + encodeURIComponent(ch), {
+        method: 'POST', body: JSON.stringify({ token: cache.token, text })
+      }),
+  };
+
+  /* ---------- ASSETS ---------- */
+  const LOGO_URL = 'assets/img/doi-logo.png?v=20260715c';
+  const HERO_TEAM_URL = 'assets/img/hero-team.png?v=20260715c';
+  const HERO_GATE_URL = 'assets/img/hero-gate.png?v=20260715c';
+  window.DOI_LOGO_URL = LOGO_URL;
+
+  /* ---------- AUTH / GATE ---------- */
   function renderGate(mode = 'login', err = '') {
     const gate = $('#doiGate');
+    if (!gate) return;
     gate.hidden = false;
     gate.innerHTML = `
+      <div class="doi-gate-bg" style="background-image:url('${HERO_GATE_URL}')"></div>
       <div class="doi-gate-inner">
-        <div class="doi-gate-badge">${DOI_BADGE_SVG}</div>
+        <div class="doi-gate-badge"><img src="${LOGO_URL}" alt="DOI"/></div>
         <h1>Department of Insurgency</h1>
         <p class="doi-motto">Dismantling Greed</p>
-        <p class="doi-classified"><b>◆ CLASSIFIED</b> · Site-DOI Terminal · Authorization Required</p>
+        <p class="doi-classified"><b>◆ CLASSIFIED</b> · Site-CI Terminal · Authorization Required</p>
         <div class="doi-tabs" role="tablist">
           <button data-mode="login" class="${mode==='login'?'active':''}">Sign In</button>
           <button data-mode="register" class="${mode==='register'?'active':''}">Register</button>
@@ -167,56 +94,78 @@
         <form id="doiGateForm" autocomplete="off">
           <div class="doi-field">
             <label>Callsign</label>
-            <input name="name" required minlength="2" maxlength="24" placeholder="e.g. Vector-7" />
-            <div class="doi-hint">Alphanumeric, up to 24 chars.</div>
+            <input name="user" required minlength="3" maxlength="16" pattern="[A-Za-z0-9_]{3,16}"
+              placeholder="e.g. Vector_7" autocomplete="off"/>
+            <div class="doi-hint">3–16 chars · letters, numbers, underscore.</div>
           </div>
           <div class="doi-field">
             <label>Cipher</label>
-            <input name="pw" type="password" required minlength="3" placeholder="Any local cipher" />
-            <div class="doi-hint">Local-only. Never sent anywhere.</div>
+            <input name="pass" type="password" required minlength="4" placeholder="At least 4 characters"/>
+            <div class="doi-hint">Hashed on the server. Never logged.</div>
           </div>
           ${err ? `<div class="doi-gate-err">${esc(err)}</div>` : ''}
           <button class="doi-gate-submit" type="submit">
             ${mode==='login' ? '▸ ACCESS TERMINAL' : '▸ REGISTER OPERATIVE'}
           </button>
         </form>
-        <div class="doi-gate-foot">// SESSION-DOI · LOCAL PROFILE · NO NETWORK TRANSIT</div>
+        <div class="doi-gate-foot">// SESSION-DOI · SERVER-BACKED · SPARKEDHOST · TLS RECOMMENDED</div>
       </div>`;
     $$('.doi-tabs button', gate).forEach(b => b.addEventListener('click', () => renderGate(b.dataset.mode)));
-    $('#doiGateForm', gate).addEventListener('submit', e => {
+    $('#doiGateForm', gate).addEventListener('submit', async e => {
       e.preventDefault();
       const fd = new FormData(e.target);
-      const name = String(fd.get('name') || '').trim();
-      const pw = String(fd.get('pw') || '');
-      if (!name || name.length < 2) return renderGate(mode, 'Callsign too short.');
-      if (!pw || pw.length < 3)     return renderGate(mode, 'Cipher too short.');
-      if (!/^[A-Za-z0-9_\- .]+$/.test(name)) return renderGate(mode, 'Callsign has invalid characters.');
-      store.authIn(name);
-      gate.hidden = true;
-      // trigger re-render of current page
-      if (typeof window.__doiRender === 'function') window.__doiRender();
-      window.dispatchEvent(new CustomEvent('doi:auth'));
+      const user = String(fd.get('user') || '').trim();
+      const pass = String(fd.get('pass') || '');
+      if (!/^[A-Za-z0-9_]{3,16}$/.test(user)) return renderGate(mode, 'Callsign must be 3–16 chars, letters/numbers/_ only.');
+      if (pass.length < 4) return renderGate(mode, 'Cipher too short.');
+      try {
+        const btn = $('.doi-gate-submit', gate);
+        btn.disabled = true; btn.textContent = '… authenticating';
+        const r = mode === 'login' ? await api.login(user, pass) : await api.register(user, pass);
+        cache.token = r.token;
+        localStorage.setItem(TOKEN_KEY, cache.token);
+        const me = await api.me();
+        cache.profile = me.profile;
+        gate.hidden = true;
+        startHeartbeat();
+        if (typeof window.__doiRender === 'function') window.__doiRender();
+        window.dispatchEvent(new CustomEvent('doi:auth'));
+      } catch (e2) {
+        renderGate(mode, e2.message || 'Authentication failed');
+      }
     });
   }
 
-  function ensureGate() {
-    if (!store.isAuthed()) renderGate('login');
-    else $('#doiGate').hidden = true;
+  function signOut() {
+    cache.token = null; cache.profile = null;
+    localStorage.removeItem(TOKEN_KEY);
+    stopHeartbeat();
+    state.view = 'welcome'; state.channel = null; state.thread = null;
+    renderGate('login');
   }
 
-  window.DOI.renderGate = renderGate;
-  window.DOI.ensureGate = ensureGate;
+  function isAuthed() { return !!cache.token && !!cache.profile; }
 
-  /* ---------- AVATAR HTML ---------- */
-  function avatarHTML(name, dataUrl, size) {
-    const initial = (name || '?').trim().charAt(0).toUpperCase();
-    const style = size ? `style="width:${size}px;height:${size}px"` : '';
-    if (name === 'DOI') return `<div class="doi-avatar" ${style}>${DOI_BADGE_SVG}</div>`;
-    if (dataUrl) return `<div class="doi-avatar" ${style}><img src="${esc(dataUrl)}" alt=""/></div>`;
-    return `<div class="doi-avatar" ${style}>${esc(initial)}</div>`;
+  /* ---------- HEARTBEAT ---------- */
+  let hbTimer = null;
+  function startHeartbeat() {
+    stopHeartbeat();
+    if (!cache.token) return;
+    hbTimer = setInterval(() => { api.heartbeat().catch(() => {}); }, 30_000);
+    api.heartbeat().catch(() => {});
   }
-  window.DOI.avatarHTML = avatarHTML;
+  function stopHeartbeat() { if (hbTimer) { clearInterval(hbTimer); hbTimer = null; } }
 
+  /* ---------- STATE ---------- */
+  const state = window.__doiHomeState = window.__doiHomeState || { view: 'welcome', channel: null, thread: null };
+
+  const CHANNELS = [
+    { id:'general',   name:'general',   topic:'DOI general chat — everyone welcome.' },
+    { id:'ops',       name:'ops',       topic:'Operations coordination.' },
+    { id:'blackline', name:'blackline', topic:'BLACKLINE · restricted.' }
+  ];
+
+  /* ---------- HELPERS ---------- */
   function timeAgo(ts) {
     const d = Date.now() - ts;
     if (d < 60_000) return 'just now';
@@ -226,46 +175,40 @@
     if (day < 7) return day + 'd ago';
     return new Date(ts).toLocaleDateString();
   }
-  window.DOI.timeAgo = timeAgo;
 
-  /* ---------- HOME SHELL RENDERER ---------- */
-  // state kept in window so re-renders can persist across nav within /overview
-  const state = window.__doiHomeState = window.__doiHomeState || { view: 'welcome', channel: null, thread: null };
+  function avatarHTML(name, dataUrl, size) {
+    const initial = (name || '?').trim().charAt(0).toUpperCase();
+    const style = size ? `style="width:${size}px;height:${size}px"` : '';
+    if (name === 'DOI') return `<div class="doi-avatar" ${style}><img src="${LOGO_URL}" alt="DOI"/></div>`;
+    if (dataUrl) return `<div class="doi-avatar" ${style}><img src="${esc(dataUrl)}" alt=""/></div>`;
+    return `<div class="doi-avatar" ${style}>${esc(initial)}</div>`;
+  }
 
-  const CHANNELS = {
-    text: [
-      { id:'general',   name:'general',   topic:'DOI general chat — everyone welcome.' },
-      { id:'ops',       name:'ops',       topic:'Operations coordination.' },
-      { id:'blackline', name:'blackline', topic:'BLACKLINE · restricted.' }
-    ],
-    forums: [
-      { id:'forums', name:'forums', topic:'Threaded discussions. Any operative can start one.' }
-    ]
-  };
-
+  /* ---------- SHELL ---------- */
   function shell(centerHTML, headHTML) {
-    const p = store.getProfile() || { name:'anon', tag:'#0000' };
-    const members = DEFAULT_MEMBERS;
-    const online = members.filter(m => m.online);
-    const offline = members.filter(m => !m.online);
-    const forums = store.getForums();
+    const p = cache.profile || { name:'…', tag:'#0000', bio:'' };
+    const forums = cache.forums || [];
+    const online = cache.members.online || [];
+    const offline = cache.members.offline || [];
 
     return `
       <div class="doi-shell">
         <div class="doi-rail">
-          <div class="doi-rail-item active" title="DOI · Home" data-shell-nav="welcome">${DOI_BADGE_SVG}</div>
+          <div class="doi-rail-item active" title="DOI · Home" data-shell-nav="welcome">
+            <img src="${LOGO_URL}" alt="DOI" class="doi-rail-logo"/>
+          </div>
           <div class="doi-rail-sep"></div>
-          <a class="doi-rail-item" title="Admin Console" href="#/admin" data-link style="text-decoration:none">
+          <a class="doi-rail-item" title="Admin Console" href="#/admin" data-link>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6z"/></svg>
           </a>
-          <a class="doi-rail-item" title="AI Cores" href="#/ai" data-link style="text-decoration:none">
+          <a class="doi-rail-item" title="AI Cores" href="#/ai" data-link>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>
           </a>
-          <a class="doi-rail-item" title="CPU Builder" href="#/cpu-builder" data-link style="text-decoration:none">
+          <a class="doi-rail-item" title="CPU Builder" href="#/cpu-builder" data-link>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>
           </a>
           <div class="doi-rail-sep"></div>
-          <div class="doi-rail-item" title="Sign out" data-shell-signout>
+          <div class="doi-rail-item doi-signout" title="Sign out" data-shell-signout>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>
           </div>
         </div>
@@ -276,10 +219,8 @@
             <span>DOI · Site-CI</span>
           </div>
           <div class="doi-chan-scroll">
-            <div class="doi-catlabel">
-              <span class="doi-chev">▾</span> Text Channels
-            </div>
-            ${CHANNELS.text.map(ch => `
+            <div class="doi-catlabel"><span class="doi-chev">▾</span> Text Channels</div>
+            ${CHANNELS.map(ch => `
               <div class="doi-ch ${state.view==='channel' && state.channel===ch.id ? 'active':''}" data-shell-nav="channel" data-ch="${ch.id}">
                 <span class="doi-hash">#</span>
                 <span class="doi-ch-name">${esc(ch.name)}</span>
@@ -294,11 +235,11 @@
               <span class="doi-ch-name">forum-index</span>
               <span class="doi-ch-count">${forums.length}</span>
             </div>
-            ${forums.slice(0, 8).map(t => `
+            ${forums.slice(0, 12).map(t => `
               <div class="doi-ch thread ${state.view==='thread' && state.thread===t.id ? 'active':''}" data-shell-nav="thread" data-thread="${t.id}">
                 <span class="doi-hash">›</span>
                 <span class="doi-ch-name">${esc(t.title)}</span>
-                <span class="doi-ch-count">${t.messages.length}</span>
+                <span class="doi-ch-count">${t.count != null ? t.count : (t.messages ? t.messages.length : 0)}</span>
               </div>`).join('')}
           </div>
 
@@ -322,9 +263,9 @@
         <div class="doi-members">
           <div class="doi-mem-scroll">
             <div class="doi-mem-cat">Online · <b>${online.length}</b></div>
-            ${online.map(m => memberRow(m)).join('')}
+            ${online.length ? online.map(memberRow).join('') : '<div class="doi-empty" style="padding:14px 6px;font-size:11px">no one online</div>'}
             <div class="doi-mem-cat">Offline · ${offline.length}</div>
-            ${offline.map(m => memberRow(m)).join('')}
+            ${offline.map(memberRow).join('')}
           </div>
         </div>
       </div>
@@ -334,11 +275,11 @@
           <h3>▸ Open a new thread</h3>
           <div class="doi-field">
             <label>Title</label>
-            <input id="doiNTTitle" type="text" maxlength="80" placeholder="What's the intel?" />
+            <input id="doiNTTitle" type="text" maxlength="120" placeholder="What's the intel?"/>
           </div>
           <div class="doi-field">
             <label>First message (optional)</label>
-            <textarea id="doiNTBody" maxlength="2000" placeholder="Details, coordinates, source…"></textarea>
+            <textarea id="doiNTBody" maxlength="4000" placeholder="Details, coordinates, source…"></textarea>
           </div>
           <div class="doi-modal-actions">
             <button class="doi-btn-cancel" data-close-modal>Cancel</button>
@@ -352,16 +293,17 @@
           <h3>▸ Customize Profile</h3>
           <div class="doi-field">
             <label>Callsign</label>
-            <input id="doiPfName" type="text" maxlength="24" value="${esc(p.name)}"/>
+            <input type="text" value="${esc(p.name)}" disabled title="Username is fixed at registration"/>
+            <div class="doi-hint">Callsign is locked to the account.</div>
           </div>
           <div class="doi-field">
             <label>Bio</label>
-            <input id="doiPfBio" type="text" maxlength="80" value="${esc(p.bio || '')}"/>
+            <input id="doiPfBio" type="text" maxlength="120" value="${esc(p.bio || '')}"/>
           </div>
           <div class="doi-field">
-            <label>Avatar (image file)</label>
+            <label>Avatar (image file, small!)</label>
             <input id="doiPfAvatar" type="file" accept="image/*"/>
-            <div class="doi-hint">Stored locally as base64. Keep it small.</div>
+            <div class="doi-hint">Stored on the server as base64. ~150KB max.</div>
           </div>
           <div class="doi-modal-actions">
             <button class="doi-btn-cancel" data-close-modal>Cancel</button>
@@ -374,7 +316,7 @@
 
   function memberRow(m) {
     return `<div class="doi-member ${m.online?'':'offline'}">
-      ${avatarHTML(m.name, null, 32)}
+      ${avatarHTML(m.name, m.avatar, 32)}
       <span class="doi-mem-name ${m.officer?'doi-officer':''}">${esc(m.name)}</span>
       <span class="doi-mem-status">${esc(m.status || '')}</span>
     </div>`;
@@ -382,16 +324,18 @@
 
   /* ---------- CENTER VIEWS ---------- */
   function viewWelcome() {
-    const forums = store.getForums();
+    const forums = cache.forums || [];
+    const online = cache.members.online || [];
+    const total = online.length + (cache.members.offline || []).length;
     const head = `<span class="doi-hash">▸</span><h2>Home</h2>
       <span class="doi-topic">Chat Home · DOI Terminal</span>`;
     const body = `
       <div class="doi-main-body">
         <div class="doi-hero">
-          <div class="doi-hero-img" id="doi-hero-bg"></div>
+          <div class="doi-hero-img" style="background-image:url('${HERO_TEAM_URL}')"></div>
           <div class="doi-hero-vign"></div>
           <div class="doi-hero-inner">
-            <div class="doi-hero-mark">${DOI_BADGE_SVG}</div>
+            <img class="doi-hero-mark" src="${LOGO_URL}" alt="DOI"/>
             <div class="doi-hero-txt">
               <h1>Department of Insurgency</h1>
               <p>Site-CI Terminal · Operational</p>
@@ -399,9 +343,9 @@
             </div>
           </div>
           <div class="doi-hero-stats">
-            <div>Operatives<b>${DEFAULT_MEMBERS.filter(m=>m.online).length}/${DEFAULT_MEMBERS.length}</b></div>
+            <div>Operatives<b>${online.length}/${total}</b></div>
             <div>Threads<b>${forums.length}</b></div>
-            <div>Channels<b>${CHANNELS.text.length}</b></div>
+            <div>Channels<b>${CHANNELS.length}</b></div>
             <div>Status<b>▲ GREEN</b></div>
           </div>
         </div>
@@ -437,29 +381,28 @@
 
         <div class="doi-sec-title">Recent Threads</div>
         <div class="doi-threads">
-          ${forums.slice(0, 5).map(t => threadRow(t)).join('') || '<div class="doi-empty">no threads yet</div>'}
+          ${forums.slice(0, 5).map(threadRow).join('') || '<div class="doi-empty">no threads yet — be the first</div>'}
         </div>
       </div>`;
     return { head, body };
   }
 
   function viewChannel(chId) {
-    const ch = CHANNELS.text.find(c => c.id === chId);
+    const ch = CHANNELS.find(c => c.id === chId);
     if (!ch) return viewWelcome();
-    const msgs = (store.getChat()[chId] || []);
-    const p = store.getProfile();
+    const msgs = cache.chat[chId] || [];
     const head = `<span class="doi-hash">#</span><h2>${esc(ch.name)}</h2>
       <span class="doi-topic">${esc(ch.topic)}</span>`;
     const body = `
       <div class="doi-main-body" id="doi-msgs">
-        ${msgs.length ? msgs.map(m => msgHTML(m)).join('') : '<div class="doi-empty">no messages · be the first</div>'}
+        ${msgs.length ? msgs.map(msgHTML).join('') : '<div class="doi-empty">no messages · be the first</div>'}
       </div>
       ${composerHTML('channel', chId, ch.name)}`;
     return { head, body };
   }
 
   function viewForums() {
-    const forums = store.getForums();
+    const forums = cache.forums || [];
     const head = `<span class="doi-hash">▤</span><h2>forum-index</h2>
       <span class="doi-topic">${forums.length} threads · start one any time</span>`;
     const body = `
@@ -469,20 +412,24 @@
           <button class="doi-newthread" data-shell-newthread>▸ NEW THREAD</button>
         </div>
         <div class="doi-threads" id="doi-thread-list">
-          ${forums.length ? forums.map(t => threadRow(t)).join('') : '<div class="doi-empty">no threads yet</div>'}
+          ${forums.length ? forums.map(threadRow).join('') : '<div class="doi-empty">no threads yet</div>'}
         </div>
       </div>`;
     return { head, body };
   }
 
   function viewThread(tid) {
-    const t = store.getThread(tid);
-    if (!t) return viewForums();
+    const t = cache.threads[tid];
+    if (!t) {
+      const head = `<span class="doi-hash">›</span><h2>Loading thread…</h2>
+        <span class="doi-topic">fetching from server</span>`;
+      return { head, body: `<div class="doi-main-body"><div class="doi-empty">loading…</div></div>` };
+    }
     const head = `<span class="doi-hash">›</span><h2>${esc(t.title)}</h2>
       <span class="doi-topic">by <b>${esc(t.author)}</b> · ${timeAgo(t.ts)} · ${t.messages.length} posts</span>`;
     const body = `
       <div class="doi-main-body" id="doi-msgs">
-        ${t.messages.length ? t.messages.map(m => msgHTML(m)).join('') : '<div class="doi-empty">empty thread</div>'}
+        ${t.messages.length ? t.messages.map(msgHTML).join('') : '<div class="doi-empty">empty thread</div>'}
       </div>
       ${composerHTML('thread', tid, 'thread')}`;
     return { head, body };
@@ -494,7 +441,7 @@
         <div class="doi-thread-title">${esc(t.title)}</div>
         <div class="doi-thread-meta">by <b>${esc(t.author)}</b> · ${timeAgo(t.ts)}</div>
       </div>
-      <span class="doi-thread-count">${t.messages.length} ◆</span>
+      <span class="doi-thread-count">${t.count != null ? t.count : (t.messages ? t.messages.length : 0)} ◆</span>
     </div>`;
   }
 
@@ -513,179 +460,357 @@
   }
 
   function composerHTML(kind, id, label) {
-    if (!kind) return '';
     return `<div class="doi-composer">
       <form data-composer data-kind="${kind}" data-id="${esc(id)}">
-        <input type="text" placeholder="Message ${esc(label || '')}" maxlength="1000" autocomplete="off"/>
+        <input type="text" placeholder="Message ${esc(label || '')}" maxlength="2000" autocomplete="off"/>
         <button type="submit">Send ▸</button>
       </form>
     </div>`;
   }
 
-  /* ---------- WIRE UP ---------- */
+  /* ---------- POLLING (live updates) ---------- */
+  let pollTimer = null;
+  function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+  function startPoll() {
+    stopPoll();
+    // members refreshed on a slower cadence
+    let tick = 0;
+    pollTimer = setInterval(async () => {
+      tick++;
+      try {
+        if (state.view === 'channel' && state.channel) {
+          const ch = state.channel;
+          const since = cache.chatSince[ch] || 0;
+          const r = await api.chat(ch, since);
+          if (r.messages && r.messages.length) {
+            const prev = cache.chat[ch] || [];
+            // if since was 0 replace, else append
+            cache.chat[ch] = since ? [...prev, ...r.messages] : r.messages;
+            const last = cache.chat[ch][cache.chat[ch].length - 1];
+            cache.chatSince[ch] = last.ts;
+            rerenderCenterSoft();
+          } else if (!cache.chat[ch]) {
+            cache.chat[ch] = r.messages || [];
+          }
+        } else if (state.view === 'thread' && state.thread) {
+          const r = await api.thread(state.thread);
+          if (r.thread) {
+            const prev = cache.threads[state.thread];
+            const changed = !prev || prev.messages.length !== r.thread.messages.length;
+            cache.threads[state.thread] = r.thread;
+            if (changed) rerenderCenterSoft();
+          }
+        }
+        if (tick % 5 === 0) { // every ~15s, refresh members
+          const m = await api.members();
+          cache.members = { online: m.online || [], offline: m.offline || [] };
+          // don't full re-render on member updates alone (avoid input focus loss)
+          rerenderMembersOnly();
+        }
+      } catch (_) { /* ignore poll errors */ }
+    }, 3_000);
+  }
+
+  function rerenderCenterSoft() {
+    // Preserve composer input value + focus across re-render of just the main pane
+    const container = document.getElementById('content');
+    if (!container) return;
+    const activeVal = document.activeElement && document.activeElement.matches('.doi-composer input')
+      ? document.activeElement.value : null;
+    let view;
+    if (state.view === 'channel') view = viewChannel(state.channel);
+    else if (state.view === 'thread') view = viewThread(state.thread);
+    else if (state.view === 'forums') view = viewForums();
+    else view = viewWelcome();
+    const mainHead = container.querySelector('.doi-main-head');
+    const main = container.querySelector('.doi-main');
+    if (main && mainHead) {
+      mainHead.innerHTML = view.head;
+      // replace everything after head inside main
+      $$('.doi-main-body, .doi-composer', main).forEach(n => n.remove());
+      main.insertAdjacentHTML('beforeend', view.body);
+      wireComposers(container);
+      const msgs = container.querySelector('#doi-msgs');
+      if (msgs) msgs.scrollTop = msgs.scrollHeight;
+      if (activeVal != null) {
+        const input = container.querySelector('.doi-composer input');
+        if (input) { input.focus(); input.value = activeVal; }
+      }
+    }
+  }
+  function rerenderMembersOnly() {
+    const container = document.getElementById('content');
+    if (!container) return;
+    const membersBox = container.querySelector('.doi-members .doi-mem-scroll');
+    if (!membersBox) return;
+    const online = cache.members.online || [];
+    const offline = cache.members.offline || [];
+    membersBox.innerHTML = `
+      <div class="doi-mem-cat">Online · <b>${online.length}</b></div>
+      ${online.length ? online.map(memberRow).join('') : '<div class="doi-empty" style="padding:14px 6px;font-size:11px">no one online</div>'}
+      <div class="doi-mem-cat">Offline · ${offline.length}</div>
+      ${offline.map(memberRow).join('')}`;
+  }
+
+  function rerenderAll() {
+    if (typeof window.__doiRender === 'function') window.__doiRender();
+  }
+
+  /* ---------- WIRE ---------- */
+  function wireComposers(container) {
+    $$('[data-composer]', container).forEach(f => {
+      if (f.dataset.wired) return;
+      f.dataset.wired = '1';
+      f.addEventListener('submit', async e => {
+        e.preventDefault();
+        const input = f.querySelector('input');
+        const text = input.value.trim();
+        if (!text) return;
+        const kind = f.dataset.kind, id = f.dataset.id;
+        input.disabled = true;
+        try {
+          if (kind === 'channel') {
+            const r = await api.sendChat(id, text);
+            const list = cache.chat[id] || (cache.chat[id] = []);
+            list.push(r.message);
+            cache.chatSince[id] = r.message.ts;
+          } else if (kind === 'thread') {
+            const r = await api.postThread(id, text);
+            const t = cache.threads[id];
+            if (t) t.messages.push(r.message);
+          }
+          input.value = '';
+          rerenderCenterSoft();
+        } catch (e2) {
+          alert('Send failed: ' + e2.message);
+        } finally {
+          input.disabled = false; input.focus();
+        }
+      });
+    });
+  }
+
   function wire(container) {
-    // navigate within shell
-    $$('[data-shell-nav]', container).forEach(el => el.addEventListener('click', e => {
+    // navigation
+    $$('[data-shell-nav]', container).forEach(el => el.addEventListener('click', async e => {
       const t = el.dataset.shellNav;
       if (t === 'welcome') { state.view = 'welcome'; }
       else if (t === 'channel') { state.view = 'channel'; state.channel = el.dataset.ch; }
       else if (t === 'forums')  { state.view = 'forums'; }
       else if (t === 'thread')  { state.view = 'thread'; state.thread = el.dataset.thread; }
-      rerender();
+      // eagerly fetch data for the target view before rerender
+      await preloadForView();
+      rerenderAll();
+      startPoll();
     }));
 
     // sign out
-    const so = $('[data-shell-signout]', container);
-    if (so) so.addEventListener('click', () => {
-      store.signOut();
-      state.view = 'welcome'; state.channel = null; state.thread = null;
-      renderGate('login');
-    });
+    const so = container.querySelector('[data-shell-signout]');
+    if (so) so.addEventListener('click', signOut);
 
-    // new thread modal open
+    // new-thread modal open
     $$('[data-shell-newthread]', container).forEach(el => el.addEventListener('click', () => {
-      const m = $('#doiNewThreadModal', container); if (m) { m.hidden = false; $('#doiNTTitle', m)?.focus(); }
+      const m = container.querySelector('#doiNewThreadModal');
+      if (m) { m.hidden = false; setTimeout(() => container.querySelector('#doiNTTitle')?.focus(), 30); }
     }));
+
     // profile modal open
     $$('[data-shell-editprofile]', container).forEach(el => el.addEventListener('click', () => {
-      const m = $('#doiProfileModal', container); if (m) { m.hidden = false; }
-    }));
-    // close modals
-    $$('[data-close-modal]', container).forEach(b => b.addEventListener('click', () => {
-      b.closest('.doi-modal').hidden = true;
-    }));
-    $$('.doi-modal', container).forEach(m => m.addEventListener('click', e => {
-      if (e.target === m) m.hidden = true;
+      const m = container.querySelector('#doiProfileModal');
+      if (m) m.hidden = false;
     }));
 
+    // close modals
+    $$('[data-close-modal]', container).forEach(b => b.addEventListener('click', () => b.closest('.doi-modal').hidden = true));
+    $$('.doi-modal', container).forEach(m => m.addEventListener('click', e => { if (e.target === m) m.hidden = true; }));
+
     // submit new thread
-    const submitT = $('[data-submit-thread]', container);
-    if (submitT) submitT.addEventListener('click', () => {
-      const title = $('#doiNTTitle', container).value.trim();
-      const body  = $('#doiNTBody', container).value.trim();
+    const submitT = container.querySelector('[data-submit-thread]');
+    if (submitT) submitT.addEventListener('click', async () => {
+      const title = container.querySelector('#doiNTTitle').value.trim();
+      const body  = container.querySelector('#doiNTBody').value.trim();
       if (!title) return;
-      const t = store.addThread(title, body);
-      state.view = 'thread'; state.thread = t.id;
-      rerender();
+      submitT.disabled = true; submitT.textContent = '… posting';
+      try {
+        const r = await api.newThread(title, body);
+        // refresh forum list
+        const list = await api.forums();
+        cache.forums = list.threads || [];
+        cache.threads[r.thread.id] = r.thread;
+        state.view = 'thread'; state.thread = r.thread.id;
+        rerenderAll();
+      } catch (e2) {
+        alert('Failed: ' + e2.message);
+      } finally {
+        submitT.disabled = false; submitT.textContent = '▸ Create Thread';
+      }
     });
 
     // submit profile
-    const submitP = $('[data-submit-profile]', container);
-    if (submitP) submitP.addEventListener('click', () => {
-      const p = store.getProfile() || {};
-      const name = $('#doiPfName', container).value.trim() || p.name;
-      const bio  = $('#doiPfBio', container).value.trim();
-      const file = $('#doiPfAvatar', container).files[0];
-      const finish = (dataUrl) => {
-        const np = { ...p, name, bio };
-        if (dataUrl) np.avatar = dataUrl;
-        store.setProfile(np);
-        rerender();
+    const submitP = container.querySelector('[data-submit-profile]');
+    if (submitP) submitP.addEventListener('click', async () => {
+      const bio = container.querySelector('#doiPfBio').value.trim();
+      const file = container.querySelector('#doiPfAvatar').files[0];
+      const finish = async (avatar) => {
+        submitP.disabled = true; submitP.textContent = '… saving';
+        try {
+          const r = await api.saveProfile({ bio, avatar });
+          cache.profile = r.profile;
+          const modal = container.querySelector('#doiProfileModal');
+          if (modal) modal.hidden = true;
+          rerenderAll();
+        } catch (e2) {
+          alert('Save failed: ' + e2.message);
+        } finally {
+          submitP.disabled = false; submitP.textContent = '▸ Save';
+        }
       };
       if (file) {
+        if (file.size > 200_000) return alert('Avatar too big — keep it under 200KB.');
         const rd = new FileReader();
         rd.onload = () => finish(String(rd.result));
         rd.readAsDataURL(file);
-      } else finish();
+      } else finish(undefined);
     });
 
-    // composer submit
-    $$('[data-composer]', container).forEach(f => f.addEventListener('submit', e => {
-      e.preventDefault();
-      const input = f.querySelector('input');
-      const text = input.value.trim();
-      if (!text) return;
-      const kind = f.dataset.kind, id = f.dataset.id;
-      if (kind === 'channel') store.addChatMsg(id, text);
-      else if (kind === 'thread') store.addThreadMsg(id, text);
-      input.value = '';
-      rerender();
-    }));
+    wireComposers(container);
 
-    // if user has dropped assets/img/soldiers-team.jpg, try loading it
-    const heroBg = $('#doi-hero-bg', container);
-    if (heroBg) {
-      const img = new Image();
-      img.onload = () => {
-        heroBg.style.backgroundImage = `url('assets/img/soldiers-team.jpg')`;
-        heroBg.classList.remove('placeholder');
-      };
-      img.onerror = () => { heroBg.classList.add('placeholder'); };
-      img.src = 'assets/img/soldiers-team.jpg';
-    }
-
-    // auto-scroll chat to bottom
-    const msgs = $('#doi-msgs', container);
+    // scroll chat to bottom, focus composer
+    const msgs = container.querySelector('#doi-msgs');
     if (msgs) msgs.scrollTop = msgs.scrollHeight;
+    const inp = container.querySelector('.doi-composer input');
+    if (inp) inp.focus();
 
     // forum search
-    const search = $('#doi-forum-search', container);
-    const list = $('#doi-thread-list', container);
+    const search = container.querySelector('#doi-forum-search');
+    const list = container.querySelector('#doi-thread-list');
     if (search && list) {
       search.addEventListener('input', () => {
         const q = search.value.toLowerCase();
-        const forums = store.getForums().filter(t =>
+        const filtered = (cache.forums || []).filter(t =>
           !q || t.title.toLowerCase().includes(q) || t.author.toLowerCase().includes(q));
-        list.innerHTML = forums.length ? forums.map(threadRow).join('') : '<div class="doi-empty">no threads match</div>';
-        $$('[data-shell-nav="thread"]', list).forEach(el => el.addEventListener('click', () => {
-          state.view = 'thread'; state.thread = el.dataset.thread; rerender();
+        list.innerHTML = filtered.length ? filtered.map(threadRow).join('') : '<div class="doi-empty">no threads match</div>';
+        $$('[data-shell-nav="thread"]', list).forEach(el => el.addEventListener('click', async () => {
+          state.view = 'thread'; state.thread = el.dataset.thread;
+          await preloadForView(); rerenderAll(); startPoll();
         }));
       });
     }
   }
 
-  function rerender() {
-    if (typeof window.__doiRender === 'function') window.__doiRender();
+  /* ---------- PRELOAD PER VIEW ---------- */
+  async function preloadForView() {
+    try {
+      // forums list is used by the sidebar every view
+      if (!cache.forums || Date.now() - cache.fetchedForums > 30_000) {
+        const r = await api.forums();
+        cache.forums = r.threads || [];
+        cache.fetchedForums = Date.now();
+      }
+      if (!cache.members || Date.now() - cache.fetchedMembers > 20_000) {
+        const m = await api.members();
+        cache.members = { online: m.online || [], offline: m.offline || [] };
+        cache.fetchedMembers = Date.now();
+      }
+      if (state.view === 'channel' && state.channel) {
+        const ch = state.channel;
+        if (!cache.chat[ch]) {
+          const r = await api.chat(ch);
+          cache.chat[ch] = r.messages || [];
+          if (cache.chat[ch].length) cache.chatSince[ch] = cache.chat[ch][cache.chat[ch].length - 1].ts;
+        }
+      } else if (state.view === 'thread' && state.thread) {
+        if (!cache.threads[state.thread]) {
+          const r = await api.thread(state.thread);
+          if (r.thread) cache.threads[state.thread] = r.thread;
+        }
+      }
+    } catch (e) { /* soft fail */ }
   }
 
   /* ---------- PUBLIC RENDERERS ---------- */
-  window.DOI.renderHome = function () {
-    if (!store.isAuthed()) return '';
-    let view;
-    if (state.view === 'channel') view = viewChannel(state.channel);
-    else if (state.view === 'forums') view = viewForums();
-    else if (state.view === 'thread') view = viewThread(state.thread);
-    else view = viewWelcome();
-    return shell(view.body, view.head);
+  window.DOI = {
+    renderGate,
+    ensureGate: () => { if (!isAuthed()) renderGate('login'); else $('#doiGate').hidden = true; },
+    signOut,
+    isAuthed,
+    LOGO_URL,
+    renderHome() {
+      if (!isAuthed()) return '';
+      let view;
+      if (state.view === 'channel') view = viewChannel(state.channel);
+      else if (state.view === 'forums') view = viewForums();
+      else if (state.view === 'thread') view = viewThread(state.thread);
+      else view = viewWelcome();
+      return shell(view.body, view.head);
+    },
+    wireHome(container) {
+      if (!container) return;
+      wire(container);
+      startPoll();
+      // if we haven't loaded initial data yet, do it now and re-render
+      preloadForView().then(() => { rerenderAll(); });
+    },
+    renderAdminHub() {
+      return `
+        <div class="doi-admin-warn">
+          <b>▸ ADMIN CONSOLE</b> — Restricted tooling. Bridge, script vault, world builder, and vehicle grid moved here.
+        </div>
+        <div class="doi-admin-grid">
+          <a class="doi-admin-card" href="#/battlefeuer" data-link>
+            <span class="doi-adm-ico">🛰</span>
+            <h4>Battlefeuer Bridge</h4>
+            <p>The bridge script, wonder-scripts, decoder, live console.</p>
+          </a>
+          <a class="doi-admin-card" href="#/scripts" data-link>
+            <span class="doi-adm-ico">📂</span>
+            <h4>Script Library</h4>
+            <p>Every script + avatar vault.</p>
+          </a>
+          <a class="doi-admin-card" href="#/world-builder" data-link>
+            <span class="doi-adm-ico">🌐</span>
+            <h4>World Builder</h4>
+            <p>Real-world terrain + Roblox world server.</p>
+          </a>
+          <a class="doi-admin-card" href="#/map-drive" data-link>
+            <span class="doi-adm-ico">🚗</span>
+            <h4>Map Drive</h4>
+            <p>Satellite driving grid.</p>
+          </a>
+        </div>`;
+    },
   };
 
-  window.DOI.wireHome = function (container) {
-    if (!container) return;
-    wire(container);
-  };
+  /* ---------- BOOT ---------- */
+  // On page load, if we have a token, verify it against /api/doi/me and pull profile.
+  // If it fails, clear token and show gate.
+  async function boot() {
+    if (!cache.token) { renderGate('login'); return; }
+    try {
+      const r = await api.me();
+      cache.profile = r.profile;
+      startHeartbeat();
+      // trigger the app render once so home actually shows the shell
+      if (typeof window.__doiRender === 'function') window.__doiRender();
+      window.dispatchEvent(new CustomEvent('doi:auth'));
+    } catch (_) {
+      cache.token = null;
+      localStorage.removeItem(TOKEN_KEY);
+      renderGate('login');
+    }
+  }
+  // defer to ensure #doiGate is in the DOM
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
 
-  window.DOI.renderAdminHub = function () {
-    return `
-      <div class="doi-admin-warn">
-        <b>▸ ADMIN CONSOLE</b> — Restricted tooling. Bridge, script vault, world builder, and vehicle grid moved here.
-      </div>
-      <div class="doi-admin-grid">
-        <a class="doi-admin-card" href="#/battlefeuer" data-link>
-          <span class="doi-adm-ico">🛰</span>
-          <h4>Battlefeuer Bridge</h4>
-          <p>The bridge script, wonder-scripts, decoder, live console.</p>
-        </a>
-        <a class="doi-admin-card" href="#/scripts" data-link>
-          <span class="doi-adm-ico">📂</span>
-          <h4>Script Library</h4>
-          <p>Every script + avatar vault.</p>
-        </a>
-        <a class="doi-admin-card" href="#/world-builder" data-link>
-          <span class="doi-adm-ico">🌐</span>
-          <h4>World Builder</h4>
-          <p>Real-world terrain + Roblox world server.</p>
-        </a>
-        <a class="doi-admin-card" href="#/map-drive" data-link>
-          <span class="doi-adm-ico">🚗</span>
-          <h4>Map Drive</h4>
-          <p>Satellite driving grid.</p>
-        </a>
-      </div>`;
-  };
-
-  // dispatch an event when any storage-affecting local update happens so
-  // other tabs on the same origin refresh
+  // Sign-out on manual token removal from other tabs
   window.addEventListener('storage', e => {
-    if (e.key === PROFILE_KEY || e.key === FORUM_KEY || e.key === CHAT_KEY) rerender();
+    if (e.key === TOKEN_KEY) {
+      cache.token = localStorage.getItem(TOKEN_KEY);
+      if (!cache.token) { cache.profile = null; stopHeartbeat(); rerenderAll(); renderGate('login'); }
+    }
   });
 })();

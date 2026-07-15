@@ -26,10 +26,14 @@
   }
 
   function render() {
-    // auth gate before anything else
-    if (window.DOI && !window.DOI.store.isAuthed()) {
-      window.DOI.renderGate('login');
-      return;
+    // auth gate before anything else. If we have a token but the profile
+    // hasn't arrived yet, don't flash the gate — doi.js will re-render
+    // when the profile comes back or when the token is rejected.
+    if (window.DOI && !window.DOI.isAuthed()) {
+      const hasToken = !!localStorage.getItem('doi.token');
+      if (!hasToken) { window.DOI.renderGate('login'); return; }
+      // token pending validation — fall through and let the home shell render
+      // the "loading" state, or the gate will replace it on 401
     }
 
     const path = currentPath();

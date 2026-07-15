@@ -6,4 +6,5 @@ token.txt
 # runtime data (lives on the server, never in the repo)
 accounts.json
 worldstate.json
+doi.json
 tilecache/

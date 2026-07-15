@@ -69,7 +69,7 @@ function get(url, headers = {}) {
    Uses the GitHub blob API (base64) so it works for PRIVATE repos
    too — no reliance on raw.githubusercontent.com. ---- */
 async function updateFromBranch(branch) {
-  const SKIP = [".git", "accounts.json", "worldstate.json", "tilecache"]; // never overwrite git internals or live runtime data
+  const SKIP = [".git", "accounts.json", "worldstate.json", "doi.json", "tilecache"]; // never overwrite git internals or live runtime data
   const meta = JSON.parse(await get(`https://api.github.com/repos/${REPO}/branches/${branch}`, AUTH));
   const treeSha = meta.commit.commit.tree.sha;
   const tree = JSON.parse(await get(`https://api.github.com/repos/${REPO}/git/trees/${treeSha}?recursive=1`, AUTH));
@@ -142,6 +142,71 @@ function userFromToken(t) {
 
 const world = {}; // key -> { user, lat, lng, heading, speed, mode, car, carLat, carLng, ts }
 const WORLD_TTL = 15000;
+
+/* ---- DOI network (forums + chat + profiles) ---- */
+const DOI_FILE = path.join(__dirname, "doi.json");
+let doiStore = { forums: [], chat: {}, profiles: {} };
+try {
+  const loaded = JSON.parse(fs.readFileSync(DOI_FILE, "utf8"));
+  if (loaded && typeof loaded === "object") {
+    doiStore.forums   = Array.isArray(loaded.forums) ? loaded.forums : [];
+    doiStore.chat     = (loaded.chat && typeof loaded.chat === "object") ? loaded.chat : {};
+    doiStore.profiles = (loaded.profiles && typeof loaded.profiles === "object") ? loaded.profiles : {};
+  }
+} catch (_) {}
+// seed default forum threads on first boot so the UI isn't empty
+if (!doiStore.forums.length) {
+  doiStore.forums = [
+    { id:"t-welcome", title:"Field Manual · Welcome, Insurgent", author:"DOI", ts:1704067200000,
+      messages:[{ id:"m1", author:"DOI", ts:1704067200000,
+        text:"Welcome to the Department of Insurgency network. This is a secure forum. Introduce yourself, and remember — dismantling greed is the mission." }] },
+    { id:"t-ops", title:"Ops Briefing · Report a target", author:"DOI", ts:1704067200000,
+      messages:[{ id:"m1", author:"DOI", ts:1704067200000,
+        text:"Post confirmed targets, sightings, and intel here. Include location, source, and confidence." }] }
+  ];
+}
+let doiSaveTimer = null;
+function saveDoi() {
+  if (doiSaveTimer) return;
+  doiSaveTimer = setTimeout(() => {
+    doiSaveTimer = null;
+    try { fs.writeFileSync(DOI_FILE, JSON.stringify(doiStore)); }
+    catch (e) { console.log("[doi] save failed:", e.message); }
+  }, 600);
+}
+
+const DOI_FORUM_CAP = 500;          // total threads
+const DOI_MSG_CAP   = 300;          // messages per thread
+const DOI_CHAT_CAP  = 300;          // messages per chat channel
+const DOI_ONLINE_TTL = 60_000;      // 60s of inactivity → offline
+const doiOnline = {}; // key -> { user, ts, status }
+
+function doiUserFromToken(t) {
+  const k = userFromToken(t);
+  if (!k) return null;
+  const rec = accounts.users[k];
+  return rec ? { key: k, name: rec.user } : null;
+}
+function doiProfile(key) {
+  const p = doiStore.profiles[key];
+  const rec = accounts.users[key];
+  return {
+    name: rec ? rec.user : key,
+    tag:  (p && p.tag)   || ("#" + String(1000 + (Math.abs(hashCode(key)) % 9000))),
+    bio:  (p && p.bio)   || "Insurgent",
+    avatar: (p && p.avatar) || null,
+    joined: (rec && rec.created) || Date.now()
+  };
+}
+function hashCode(s) { let h = 0; for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0; return h; }
+
+function doiMarkOnline(key, name, status) {
+  doiOnline[key] = { user: name, ts: Date.now(), status: strOr(status, 24) || "operator" };
+}
+function doiPurgeOffline() {
+  const now = Date.now();
+  for (const k in doiOnline) if (now - doiOnline[k].ts > DOI_ONLINE_TTL) delete doiOnline[k];
+}
 
 /* ---- persistent world changes (trees cut, wildlife, …) ----
    Stored on disk so forest harvesting + wildlife edits survive restarts and
@@ -324,6 +389,128 @@ async function handleApi(req, res, urlPath, query) {
       "Cache-Control": "no-store",
     });
     return res.end(lua);
+  }
+
+  /* ---- DOI network: forums, chat, profile, members ---- */
+  if (urlPath === "/api/doi/me" && req.method === "GET") {
+    const tok = query.get("token") || "";
+    const u = doiUserFromToken(tok);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    doiMarkOnline(u.key, u.name, "operator");
+    return sendJSON(res, { ok: true, profile: doiProfile(u.key) });
+  }
+  if (urlPath === "/api/doi/me" && req.method === "POST") {
+    const m = await readBody(req);
+    const u = doiUserFromToken(m.token);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    const p = doiStore.profiles[u.key] || {};
+    if (typeof m.bio === "string")    p.bio    = m.bio.slice(0, 120);
+    if (typeof m.avatar === "string") {
+      // cap avatar payload at ~200KB base64 to prevent abuse
+      p.avatar = m.avatar.length > 260_000 ? p.avatar : m.avatar;
+    }
+    if (typeof m.status === "string") p.status = m.status.slice(0, 24);
+    doiStore.profiles[u.key] = p;
+    saveDoi();
+    doiMarkOnline(u.key, u.name, p.status || "operator");
+    return sendJSON(res, { ok: true, profile: doiProfile(u.key) });
+  }
+
+  if (urlPath === "/api/doi/members" && req.method === "GET") {
+    doiPurgeOffline();
+    const online = Object.entries(doiOnline).map(([k, v]) => ({
+      id: k, name: v.user, status: v.status, online: true,
+      avatar: (doiStore.profiles[k] && doiStore.profiles[k].avatar) || null,
+      officer: (v.user === "DOI" || /^Cmdr\./i.test(v.user))
+    }));
+    // include registered but currently offline users, capped
+    const offline = Object.entries(accounts.users)
+      .filter(([k]) => !doiOnline[k])
+      .slice(0, 40)
+      .map(([k, r]) => ({
+        id: k, name: r.user, status: "offline", online: false,
+        avatar: (doiStore.profiles[k] && doiStore.profiles[k].avatar) || null,
+        officer: (r.user === "DOI" || /^Cmdr\./i.test(r.user))
+      }));
+    return sendJSON(res, { ok: true, online, offline });
+  }
+  if (urlPath === "/api/doi/heartbeat" && req.method === "POST") {
+    const m = await readBody(req);
+    const u = doiUserFromToken(m.token);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    doiMarkOnline(u.key, u.name, (doiStore.profiles[u.key] && doiStore.profiles[u.key].status) || "operator");
+    return sendJSON(res, { ok: true });
+  }
+
+  if (urlPath === "/api/doi/forums" && req.method === "GET") {
+    return sendJSON(res, { ok: true, threads: doiStore.forums.map(t => ({
+      id: t.id, title: t.title, author: t.author, ts: t.ts, count: t.messages.length
+    })) });
+  }
+  if (urlPath === "/api/doi/forums" && req.method === "POST") {
+    const m = await readBody(req);
+    const u = doiUserFromToken(m.token);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    const title = String(m.title || "").trim().slice(0, 120);
+    if (!title) return sendJSON(res, { error: "Title required" }, 400);
+    const body = String(m.body || "").trim().slice(0, 4000);
+    const t = {
+      id: "t-" + crypto.randomBytes(6).toString("hex"),
+      title, author: u.name, ts: Date.now(),
+      messages: body ? [{ id: "m1", author: u.name, ts: Date.now(), text: body }] : []
+    };
+    doiStore.forums.unshift(t);
+    if (doiStore.forums.length > DOI_FORUM_CAP) doiStore.forums.length = DOI_FORUM_CAP;
+    saveDoi();
+    doiMarkOnline(u.key, u.name, "operator");
+    return sendJSON(res, { ok: true, thread: t });
+  }
+  if (urlPath.startsWith("/api/doi/forums/") && req.method === "GET") {
+    // /api/doi/forums/:id
+    const id = urlPath.slice("/api/doi/forums/".length).split("/")[0];
+    const t = doiStore.forums.find(x => x.id === id);
+    if (!t) return sendJSON(res, { error: "not found" }, 404);
+    return sendJSON(res, { ok: true, thread: t });
+  }
+  if (urlPath.match(/^\/api\/doi\/forums\/[^/]+\/msg$/) && req.method === "POST") {
+    const id = urlPath.split("/")[4];
+    const m = await readBody(req);
+    const u = doiUserFromToken(m.token);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    const text = String(m.text || "").trim().slice(0, 2000);
+    if (!text) return sendJSON(res, { error: "empty message" }, 400);
+    const t = doiStore.forums.find(x => x.id === id);
+    if (!t) return sendJSON(res, { error: "not found" }, 404);
+    const post = { id: "m-" + crypto.randomBytes(5).toString("hex"), author: u.name, ts: Date.now(), text };
+    t.messages.push(post);
+    if (t.messages.length > DOI_MSG_CAP) t.messages.splice(0, t.messages.length - DOI_MSG_CAP);
+    saveDoi();
+    doiMarkOnline(u.key, u.name, "operator");
+    return sendJSON(res, { ok: true, message: post });
+  }
+
+  if (urlPath.startsWith("/api/doi/chat/") && req.method === "GET") {
+    const ch = urlPath.slice("/api/doi/chat/".length).split("/")[0];
+    const since = parseInt(query.get("since") || "0", 10) || 0;
+    const all = doiStore.chat[ch] || [];
+    const msgs = since ? all.filter(x => x.ts > since) : all;
+    return sendJSON(res, { ok: true, channel: ch, messages: msgs, now: Date.now() });
+  }
+  if (urlPath.startsWith("/api/doi/chat/") && req.method === "POST") {
+    const ch = urlPath.slice("/api/doi/chat/".length).split("/")[0];
+    if (!/^[a-z0-9\-]{1,24}$/.test(ch)) return sendJSON(res, { error: "bad channel" }, 400);
+    const m = await readBody(req);
+    const u = doiUserFromToken(m.token);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    const text = String(m.text || "").trim().slice(0, 2000);
+    if (!text) return sendJSON(res, { error: "empty message" }, 400);
+    if (!doiStore.chat[ch]) doiStore.chat[ch] = [];
+    const post = { id: "c-" + crypto.randomBytes(5).toString("hex"), author: u.name, ts: Date.now(), text };
+    doiStore.chat[ch].push(post);
+    if (doiStore.chat[ch].length > DOI_CHAT_CAP) doiStore.chat[ch].splice(0, doiStore.chat[ch].length - DOI_CHAT_CAP);
+    saveDoi();
+    doiMarkOnline(u.key, u.name, "operator");
+    return sendJSON(res, { ok: true, message: post });
   }
 
   return sendJSON(res, { error: "unknown endpoint" }, 404);
