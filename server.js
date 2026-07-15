@@ -143,28 +143,50 @@ function userFromToken(t) {
 const world = {}; // key -> { user, lat, lng, heading, speed, mode, car, carLat, carLng, ts }
 const WORLD_TTL = 15000;
 
-/* ---- DOI network (forums + chat + profiles) ---- */
+/* ---- DOI network (servers, channels, chat, friends, profiles) ---- */
 const DOI_FILE = path.join(__dirname, "doi.json");
-let doiStore = { forums: [], chat: {}, profiles: {} };
+let doiStore = { servers: {}, friends: {}, profiles: {} };
 try {
   const loaded = JSON.parse(fs.readFileSync(DOI_FILE, "utf8"));
   if (loaded && typeof loaded === "object") {
-    doiStore.forums   = Array.isArray(loaded.forums) ? loaded.forums : [];
-    doiStore.chat     = (loaded.chat && typeof loaded.chat === "object") ? loaded.chat : {};
+    doiStore.servers  = (loaded.servers  && typeof loaded.servers  === "object") ? loaded.servers  : {};
+    doiStore.friends  = (loaded.friends  && typeof loaded.friends  === "object") ? loaded.friends  : {};
     doiStore.profiles = (loaded.profiles && typeof loaded.profiles === "object") ? loaded.profiles : {};
   }
 } catch (_) {}
-// seed default forum threads on first boot so the UI isn't empty
-if (!doiStore.forums.length) {
-  doiStore.forums = [
-    { id:"t-welcome", title:"Field Manual · Welcome, Insurgent", author:"DOI", ts:1704067200000,
-      messages:[{ id:"m1", author:"DOI", ts:1704067200000,
-        text:"Welcome to the Department of Insurgency network. This is a secure forum. Introduce yourself, and remember — dismantling greed is the mission." }] },
-    { id:"t-ops", title:"Ops Briefing · Report a target", author:"DOI", ts:1704067200000,
-      messages:[{ id:"m1", author:"DOI", ts:1704067200000,
-        text:"Post confirmed targets, sightings, and intel here. Include location, source, and confidence." }] }
-  ];
+
+// Seed the flagship "DOI · Site-CI" server on first boot. Owner is 'doi' (the
+// user key registered as callsign "DOI"). Everyone auto-joins on login.
+const DOI_FLAGSHIP_ID = "srv-doi-flagship";
+if (!doiStore.servers[DOI_FLAGSHIP_ID]) {
+  doiStore.servers[DOI_FLAGSHIP_ID] = {
+    id: DOI_FLAGSHIP_ID,
+    name: "DOI · Site-CI",
+    description: "The flagship Department of Insurgency server. Owner: DOI.",
+    ownerKey: "doi",
+    icon: null,
+    created: Date.now(),
+    isFlagship: true,
+    categories: [
+      { id:"cat-general", name:"GENERAL", order: 0 },
+      { id:"cat-ops",     name:"OPS",     order: 1 },
+    ],
+    channels: [
+      { id:"ch-general",   name:"general",   categoryId:"cat-general", topic:"DOI general chat — everyone welcome." },
+      { id:"ch-briefings", name:"briefings", categoryId:"cat-general", topic:"Officer briefings and announcements." },
+      { id:"ch-ops",       name:"ops",       categoryId:"cat-ops",     topic:"Operations coordination." },
+      { id:"ch-blackline", name:"blackline", categoryId:"cat-ops",     topic:"BLACKLINE · restricted operations." },
+    ],
+    members: ["doi"],
+    chat: {
+      "ch-general":  [{ id:"m1", author:"DOI", ts: 1704067200000, text:"DOI network online. Speak freely." }],
+      "ch-briefings":[{ id:"m1", author:"DOI", ts: 1704067200000, text:"Officer briefings post here. Dismantling greed is the mission." }],
+      "ch-ops":      [{ id:"m1", author:"DOI", ts: 1704067200000, text:"Ops channel is open. Keep it professional." }],
+      "ch-blackline":[{ id:"m1", author:"DOI", ts: 1704067200000, text:"BLACKLINE — restricted channel." }]
+    }
+  };
 }
+
 let doiSaveTimer = null;
 function saveDoi() {
   if (doiSaveTimer) return;
@@ -175,11 +197,8 @@ function saveDoi() {
   }, 600);
 }
 
-const DOI_FORUM_CAP = 500;          // total threads
-const DOI_MSG_CAP   = 300;          // messages per thread
-const DOI_CHAT_CAP  = 300;          // messages per chat channel
-const DOI_ONLINE_TTL = 60_000;      // 60s of inactivity → offline
-const doiOnline = {}; // key -> { user, ts, status }
+const DOI_MSG_CAP    = 300;         // messages per channel
+const DOI_SRV_CAP    = 100;         // servers per user
 
 function doiUserFromToken(t) {
   const k = userFromToken(t);
@@ -195,17 +214,52 @@ function doiProfile(key) {
     tag:  (p && p.tag)   || ("#" + String(1000 + (Math.abs(hashCode(key)) % 9000))),
     bio:  (p && p.bio)   || "Insurgent",
     avatar: (p && p.avatar) || null,
-    joined: (rec && rec.created) || Date.now()
+    joined: (rec && rec.created) || Date.now(),
+    isDOI: rec && rec.user === "DOI"
   };
 }
 function hashCode(s) { let h = 0; for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0; return h; }
 
-function doiMarkOnline(key, name, status) {
-  doiOnline[key] = { user: name, ts: Date.now(), status: strOr(status, 24) || "operator" };
+// Return a compact server descriptor (no chat, no member details) for lists.
+function doiServerBrief(s, userKey) {
+  return {
+    id: s.id, name: s.name, description: s.description || "",
+    icon: s.icon || null, ownerKey: s.ownerKey,
+    isOwner: s.ownerKey === userKey,
+    isFlagship: !!s.isFlagship,
+    memberCount: (s.members || []).length,
+    created: s.created
+  };
 }
-function doiPurgeOffline() {
-  const now = Date.now();
-  for (const k in doiOnline) if (now - doiOnline[k].ts > DOI_ONLINE_TTL) delete doiOnline[k];
+// Return the full server (channels, categories, members) — caller must be member.
+function doiServerFull(s, userKey) {
+  return {
+    ...doiServerBrief(s, userKey),
+    categories: s.categories || [],
+    channels: s.channels || [],
+    members: (s.members || []).map(k => ({
+      key: k,
+      name: (accounts.users[k] ? accounts.users[k].user : k),
+      avatar: (doiStore.profiles[k] && doiStore.profiles[k].avatar) || null,
+      isOwner: k === s.ownerKey
+    }))
+  };
+}
+
+// Auto-add the flagship server to any user on first authenticated request.
+function ensureFlagshipMembership(userKey) {
+  const flagship = doiStore.servers[DOI_FLAGSHIP_ID];
+  if (!flagship) return;
+  if (!flagship.members.includes(userKey)) {
+    flagship.members.push(userKey);
+    saveDoi();
+  }
+  // If this user is the DOI account, they own the flagship
+  const rec = accounts.users[userKey];
+  if (rec && rec.user === "DOI" && flagship.ownerKey !== userKey) {
+    flagship.ownerKey = userKey;
+    saveDoi();
+  }
 }
 
 /* ---- persistent world changes (trees cut, wildlife, …) ----
@@ -391,12 +445,12 @@ async function handleApi(req, res, urlPath, query) {
     return res.end(lua);
   }
 
-  /* ---- DOI network: forums, chat, profile, members ---- */
+  /* ---- DOI network: profile, servers, channels, chat, friends ---- */
   if (urlPath === "/api/doi/me" && req.method === "GET") {
     const tok = query.get("token") || "";
     const u = doiUserFromToken(tok);
     if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
-    doiMarkOnline(u.key, u.name, "operator");
+    ensureFlagshipMembership(u.key);
     return sendJSON(res, { ok: true, profile: doiProfile(u.key) });
   }
   if (urlPath === "/api/doi/me" && req.method === "POST") {
@@ -405,112 +459,273 @@ async function handleApi(req, res, urlPath, query) {
     if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
     const p = doiStore.profiles[u.key] || {};
     if (typeof m.bio === "string")    p.bio    = m.bio.slice(0, 120);
-    if (typeof m.avatar === "string") {
-      // cap avatar payload at ~200KB base64 to prevent abuse
-      p.avatar = m.avatar.length > 260_000 ? p.avatar : m.avatar;
-    }
-    if (typeof m.status === "string") p.status = m.status.slice(0, 24);
+    if (typeof m.avatar === "string") { if (m.avatar.length < 260_000) p.avatar = m.avatar; }
     doiStore.profiles[u.key] = p;
     saveDoi();
-    doiMarkOnline(u.key, u.name, p.status || "operator");
     return sendJSON(res, { ok: true, profile: doiProfile(u.key) });
   }
 
-  if (urlPath === "/api/doi/members" && req.method === "GET") {
-    doiPurgeOffline();
-    const online = Object.entries(doiOnline).map(([k, v]) => ({
-      id: k, name: v.user, status: v.status, online: true,
-      avatar: (doiStore.profiles[k] && doiStore.profiles[k].avatar) || null,
-      officer: (v.user === "DOI" || /^Cmdr\./i.test(v.user))
-    }));
-    // include registered but currently offline users, capped
-    const offline = Object.entries(accounts.users)
-      .filter(([k]) => !doiOnline[k])
-      .slice(0, 40)
-      .map(([k, r]) => ({
-        id: k, name: r.user, status: "offline", online: false,
-        avatar: (doiStore.profiles[k] && doiStore.profiles[k].avatar) || null,
-        officer: (r.user === "DOI" || /^Cmdr\./i.test(r.user))
-      }));
-    return sendJSON(res, { ok: true, online, offline });
+  /* ---- servers ---- */
+  if (urlPath === "/api/doi/servers" && req.method === "GET") {
+    const tok = query.get("token") || "";
+    const u = doiUserFromToken(tok);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    ensureFlagshipMembership(u.key);
+    const mine = Object.values(doiStore.servers)
+      .filter(s => (s.members || []).includes(u.key))
+      .map(s => doiServerBrief(s, u.key));
+    return sendJSON(res, { ok: true, servers: mine });
   }
-  if (urlPath === "/api/doi/heartbeat" && req.method === "POST") {
+  if (urlPath === "/api/doi/servers" && req.method === "POST") {
     const m = await readBody(req);
     const u = doiUserFromToken(m.token);
     if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
-    doiMarkOnline(u.key, u.name, (doiStore.profiles[u.key] && doiStore.profiles[u.key].status) || "operator");
+    const name = String(m.name || "").trim().slice(0, 40);
+    if (!name) return sendJSON(res, { error: "Server name required" }, 400);
+    const mine = Object.values(doiStore.servers).filter(s => s.ownerKey === u.key).length;
+    if (mine >= DOI_SRV_CAP) return sendJSON(res, { error: "server cap reached" }, 429);
+    const id = "srv-" + crypto.randomBytes(6).toString("hex");
+    const catId = "cat-" + crypto.randomBytes(3).toString("hex");
+    const chId  = "ch-" + crypto.randomBytes(3).toString("hex");
+    const srv = {
+      id, name, description: String(m.description || "").slice(0, 200),
+      ownerKey: u.key, icon: null, created: Date.now(),
+      categories: [{ id: catId, name: "GENERAL", order: 0 }],
+      channels: [{ id: chId, name: "general", categoryId: catId, topic: "" }],
+      members: [u.key],
+      chat: { [chId]: [] }
+    };
+    doiStore.servers[id] = srv;
+    saveDoi();
+    return sendJSON(res, { ok: true, server: doiServerFull(srv, u.key) });
+  }
+  // /api/doi/servers/:id  — GET (full detail for member)
+  {
+    const mFull = urlPath.match(/^\/api\/doi\/servers\/([^/]+)$/);
+    if (mFull && req.method === "GET") {
+      const tok = query.get("token") || "";
+      const u = doiUserFromToken(tok);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const s = doiStore.servers[mFull[1]];
+      if (!s) return sendJSON(res, { error: "not found" }, 404);
+      if (!(s.members || []).includes(u.key)) return sendJSON(res, { error: "not a member" }, 403);
+      return sendJSON(res, { ok: true, server: doiServerFull(s, u.key) });
+    }
+  }
+  // /api/doi/servers/:id/join
+  {
+    const mm = urlPath.match(/^\/api\/doi\/servers\/([^/]+)\/join$/);
+    if (mm && req.method === "POST") {
+      const m = await readBody(req);
+      const u = doiUserFromToken(m.token);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const s = doiStore.servers[mm[1]];
+      if (!s) return sendJSON(res, { error: "not found" }, 404);
+      if (!s.members.includes(u.key)) { s.members.push(u.key); saveDoi(); }
+      return sendJSON(res, { ok: true, server: doiServerFull(s, u.key) });
+    }
+  }
+  // /api/doi/servers/:id/leave
+  {
+    const mm = urlPath.match(/^\/api\/doi\/servers\/([^/]+)\/leave$/);
+    if (mm && req.method === "POST") {
+      const m = await readBody(req);
+      const u = doiUserFromToken(m.token);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const s = doiStore.servers[mm[1]];
+      if (!s) return sendJSON(res, { error: "not found" }, 404);
+      if (s.isFlagship) return sendJSON(res, { error: "cannot leave the flagship server" }, 400);
+      if (s.ownerKey === u.key) return sendJSON(res, { error: "owner cannot leave — delete the server instead" }, 400);
+      s.members = s.members.filter(k => k !== u.key);
+      saveDoi();
+      return sendJSON(res, { ok: true });
+    }
+  }
+  // /api/doi/servers/:id/settings   (owner only) — rename, description, icon
+  {
+    const mm = urlPath.match(/^\/api\/doi\/servers\/([^/]+)\/settings$/);
+    if (mm && req.method === "POST") {
+      const m = await readBody(req);
+      const u = doiUserFromToken(m.token);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const s = doiStore.servers[mm[1]];
+      if (!s) return sendJSON(res, { error: "not found" }, 404);
+      if (s.ownerKey !== u.key) return sendJSON(res, { error: "owner only" }, 403);
+      if (typeof m.name === "string" && m.name.trim()) s.name = m.name.trim().slice(0, 40);
+      if (typeof m.description === "string") s.description = m.description.slice(0, 200);
+      if (typeof m.icon === "string" && m.icon.length < 260_000) s.icon = m.icon;
+      if (m.icon === null) s.icon = null;
+      saveDoi();
+      return sendJSON(res, { ok: true, server: doiServerFull(s, u.key) });
+    }
+  }
+  // /api/doi/servers/:id/delete  (owner only, non-flagship)
+  {
+    const mm = urlPath.match(/^\/api\/doi\/servers\/([^/]+)\/delete$/);
+    if (mm && req.method === "POST") {
+      const m = await readBody(req);
+      const u = doiUserFromToken(m.token);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const s = doiStore.servers[mm[1]];
+      if (!s) return sendJSON(res, { error: "not found" }, 404);
+      if (s.isFlagship) return sendJSON(res, { error: "cannot delete flagship" }, 400);
+      if (s.ownerKey !== u.key) return sendJSON(res, { error: "owner only" }, 403);
+      delete doiStore.servers[mm[1]];
+      saveDoi();
+      return sendJSON(res, { ok: true });
+    }
+  }
+  // /api/doi/servers/:id/categories  (POST — owner only)
+  {
+    const mm = urlPath.match(/^\/api\/doi\/servers\/([^/]+)\/categories$/);
+    if (mm && req.method === "POST") {
+      const m = await readBody(req);
+      const u = doiUserFromToken(m.token);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const s = doiStore.servers[mm[1]];
+      if (!s) return sendJSON(res, { error: "not found" }, 404);
+      if (s.ownerKey !== u.key) return sendJSON(res, { error: "owner only" }, 403);
+      const name = String(m.name || "").trim().slice(0, 30).toUpperCase();
+      if (!name) return sendJSON(res, { error: "category name required" }, 400);
+      const cat = { id: "cat-" + crypto.randomBytes(3).toString("hex"), name, order: (s.categories || []).length };
+      s.categories = s.categories || []; s.categories.push(cat);
+      saveDoi();
+      return sendJSON(res, { ok: true, category: cat });
+    }
+  }
+  // /api/doi/servers/:sid/categories/:cid/delete  (owner only)
+  {
+    const mm = urlPath.match(/^\/api\/doi\/servers\/([^/]+)\/categories\/([^/]+)\/delete$/);
+    if (mm && req.method === "POST") {
+      const m = await readBody(req);
+      const u = doiUserFromToken(m.token);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const s = doiStore.servers[mm[1]];
+      if (!s) return sendJSON(res, { error: "not found" }, 404);
+      if (s.ownerKey !== u.key) return sendJSON(res, { error: "owner only" }, 403);
+      s.categories = (s.categories || []).filter(c => c.id !== mm[2]);
+      // channels in that category become uncategorized (null)
+      (s.channels || []).forEach(ch => { if (ch.categoryId === mm[2]) ch.categoryId = null; });
+      saveDoi();
+      return sendJSON(res, { ok: true });
+    }
+  }
+  // /api/doi/servers/:id/channels  (POST — owner only)
+  {
+    const mm = urlPath.match(/^\/api\/doi\/servers\/([^/]+)\/channels$/);
+    if (mm && req.method === "POST") {
+      const m = await readBody(req);
+      const u = doiUserFromToken(m.token);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const s = doiStore.servers[mm[1]];
+      if (!s) return sendJSON(res, { error: "not found" }, 404);
+      if (s.ownerKey !== u.key) return sendJSON(res, { error: "owner only" }, 403);
+      const name = String(m.name || "").trim().slice(0, 24).toLowerCase().replace(/[^a-z0-9\-_]/g, "-");
+      if (!name) return sendJSON(res, { error: "channel name required" }, 400);
+      const catId = m.categoryId && (s.categories || []).some(c => c.id === m.categoryId) ? m.categoryId : null;
+      const ch = {
+        id: "ch-" + crypto.randomBytes(3).toString("hex"),
+        name, categoryId: catId, topic: String(m.topic || "").slice(0, 200)
+      };
+      s.channels = s.channels || []; s.channels.push(ch);
+      s.chat = s.chat || {}; s.chat[ch.id] = [];
+      saveDoi();
+      return sendJSON(res, { ok: true, channel: ch });
+    }
+  }
+  // /api/doi/servers/:sid/channels/:cid/delete  (owner only)
+  {
+    const mm = urlPath.match(/^\/api\/doi\/servers\/([^/]+)\/channels\/([^/]+)\/delete$/);
+    if (mm && req.method === "POST") {
+      const m = await readBody(req);
+      const u = doiUserFromToken(m.token);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const s = doiStore.servers[mm[1]];
+      if (!s) return sendJSON(res, { error: "not found" }, 404);
+      if (s.ownerKey !== u.key) return sendJSON(res, { error: "owner only" }, 403);
+      s.channels = (s.channels || []).filter(c => c.id !== mm[2]);
+      if (s.chat) delete s.chat[mm[2]];
+      saveDoi();
+      return sendJSON(res, { ok: true });
+    }
+  }
+  // /api/doi/servers/:sid/chat/:cid  (GET ?since=ts, POST {token,text})  (member only)
+  {
+    const mm = urlPath.match(/^\/api\/doi\/servers\/([^/]+)\/chat\/([^/]+)$/);
+    if (mm) {
+      const s = doiStore.servers[mm[1]];
+      if (!s) return sendJSON(res, { error: "not found" }, 404);
+      const cid = mm[2];
+      if (!(s.channels || []).some(c => c.id === cid)) return sendJSON(res, { error: "channel not found" }, 404);
+      if (req.method === "GET") {
+        const tok = query.get("token") || "";
+        const u = doiUserFromToken(tok);
+        if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+        if (!(s.members || []).includes(u.key)) return sendJSON(res, { error: "not a member" }, 403);
+        const since = parseInt(query.get("since") || "0", 10) || 0;
+        const all = (s.chat && s.chat[cid]) || [];
+        const msgs = since ? all.filter(x => x.ts > since) : all;
+        return sendJSON(res, { ok: true, messages: msgs, now: Date.now() });
+      }
+      if (req.method === "POST") {
+        const m = await readBody(req);
+        const u = doiUserFromToken(m.token);
+        if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+        if (!(s.members || []).includes(u.key)) return sendJSON(res, { error: "not a member" }, 403);
+        const text = String(m.text || "").trim().slice(0, 2000);
+        if (!text) return sendJSON(res, { error: "empty message" }, 400);
+        s.chat = s.chat || {}; s.chat[cid] = s.chat[cid] || [];
+        const post = { id: "c-" + crypto.randomBytes(5).toString("hex"), author: u.name, ts: Date.now(), text };
+        s.chat[cid].push(post);
+        if (s.chat[cid].length > DOI_MSG_CAP) s.chat[cid].splice(0, s.chat[cid].length - DOI_MSG_CAP);
+        saveDoi();
+        return sendJSON(res, { ok: true, message: post });
+      }
+    }
+  }
+
+  /* ---- friends ---- */
+  if (urlPath === "/api/doi/friends" && req.method === "GET") {
+    const tok = query.get("token") || "";
+    const u = doiUserFromToken(tok);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    const list = (doiStore.friends[u.key] || []).map(k => {
+      const rec = accounts.users[k];
+      const prof = doiProfile(k);
+      return {
+        key: k, name: rec ? rec.user : k,
+        avatar: prof.avatar, bio: prof.bio, tag: prof.tag
+      };
+    });
+    return sendJSON(res, { ok: true, friends: list });
+  }
+  if (urlPath === "/api/doi/friends/add" && req.method === "POST") {
+    const m = await readBody(req);
+    const u = doiUserFromToken(m.token);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    const call = String(m.callsign || "").trim();
+    if (!/^[A-Za-z0-9_]{3,16}$/.test(call)) return sendJSON(res, { error: "invalid callsign" }, 400);
+    const targetKey = call.toLowerCase();
+    if (targetKey === u.key) return sendJSON(res, { error: "cannot befriend yourself" }, 400);
+    if (!accounts.users[targetKey]) return sendJSON(res, { error: "no such operative" }, 404);
+    // symmetric friendship
+    doiStore.friends[u.key]      = doiStore.friends[u.key]      || [];
+    doiStore.friends[targetKey]  = doiStore.friends[targetKey]  || [];
+    if (!doiStore.friends[u.key].includes(targetKey)) doiStore.friends[u.key].push(targetKey);
+    if (!doiStore.friends[targetKey].includes(u.key)) doiStore.friends[targetKey].push(u.key);
+    saveDoi();
     return sendJSON(res, { ok: true });
   }
-
-  if (urlPath === "/api/doi/forums" && req.method === "GET") {
-    return sendJSON(res, { ok: true, threads: doiStore.forums.map(t => ({
-      id: t.id, title: t.title, author: t.author, ts: t.ts, count: t.messages.length
-    })) });
-  }
-  if (urlPath === "/api/doi/forums" && req.method === "POST") {
+  if (urlPath === "/api/doi/friends/remove" && req.method === "POST") {
     const m = await readBody(req);
     const u = doiUserFromToken(m.token);
     if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
-    const title = String(m.title || "").trim().slice(0, 120);
-    if (!title) return sendJSON(res, { error: "Title required" }, 400);
-    const body = String(m.body || "").trim().slice(0, 4000);
-    const t = {
-      id: "t-" + crypto.randomBytes(6).toString("hex"),
-      title, author: u.name, ts: Date.now(),
-      messages: body ? [{ id: "m1", author: u.name, ts: Date.now(), text: body }] : []
-    };
-    doiStore.forums.unshift(t);
-    if (doiStore.forums.length > DOI_FORUM_CAP) doiStore.forums.length = DOI_FORUM_CAP;
+    const call = String(m.callsign || "").trim();
+    const targetKey = call.toLowerCase();
+    if (doiStore.friends[u.key])     doiStore.friends[u.key]     = doiStore.friends[u.key].filter(k => k !== targetKey);
+    if (doiStore.friends[targetKey]) doiStore.friends[targetKey] = doiStore.friends[targetKey].filter(k => k !== u.key);
     saveDoi();
-    doiMarkOnline(u.key, u.name, "operator");
-    return sendJSON(res, { ok: true, thread: t });
-  }
-  if (urlPath.startsWith("/api/doi/forums/") && req.method === "GET") {
-    // /api/doi/forums/:id
-    const id = urlPath.slice("/api/doi/forums/".length).split("/")[0];
-    const t = doiStore.forums.find(x => x.id === id);
-    if (!t) return sendJSON(res, { error: "not found" }, 404);
-    return sendJSON(res, { ok: true, thread: t });
-  }
-  if (urlPath.match(/^\/api\/doi\/forums\/[^/]+\/msg$/) && req.method === "POST") {
-    const id = urlPath.split("/")[4];
-    const m = await readBody(req);
-    const u = doiUserFromToken(m.token);
-    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
-    const text = String(m.text || "").trim().slice(0, 2000);
-    if (!text) return sendJSON(res, { error: "empty message" }, 400);
-    const t = doiStore.forums.find(x => x.id === id);
-    if (!t) return sendJSON(res, { error: "not found" }, 404);
-    const post = { id: "m-" + crypto.randomBytes(5).toString("hex"), author: u.name, ts: Date.now(), text };
-    t.messages.push(post);
-    if (t.messages.length > DOI_MSG_CAP) t.messages.splice(0, t.messages.length - DOI_MSG_CAP);
-    saveDoi();
-    doiMarkOnline(u.key, u.name, "operator");
-    return sendJSON(res, { ok: true, message: post });
-  }
-
-  if (urlPath.startsWith("/api/doi/chat/") && req.method === "GET") {
-    const ch = urlPath.slice("/api/doi/chat/".length).split("/")[0];
-    const since = parseInt(query.get("since") || "0", 10) || 0;
-    const all = doiStore.chat[ch] || [];
-    const msgs = since ? all.filter(x => x.ts > since) : all;
-    return sendJSON(res, { ok: true, channel: ch, messages: msgs, now: Date.now() });
-  }
-  if (urlPath.startsWith("/api/doi/chat/") && req.method === "POST") {
-    const ch = urlPath.slice("/api/doi/chat/".length).split("/")[0];
-    if (!/^[a-z0-9\-]{1,24}$/.test(ch)) return sendJSON(res, { error: "bad channel" }, 400);
-    const m = await readBody(req);
-    const u = doiUserFromToken(m.token);
-    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
-    const text = String(m.text || "").trim().slice(0, 2000);
-    if (!text) return sendJSON(res, { error: "empty message" }, 400);
-    if (!doiStore.chat[ch]) doiStore.chat[ch] = [];
-    const post = { id: "c-" + crypto.randomBytes(5).toString("hex"), author: u.name, ts: Date.now(), text };
-    doiStore.chat[ch].push(post);
-    if (doiStore.chat[ch].length > DOI_CHAT_CAP) doiStore.chat[ch].splice(0, doiStore.chat[ch].length - DOI_CHAT_CAP);
-    saveDoi();
-    doiMarkOnline(u.key, u.name, "operator");
-    return sendJSON(res, { ok: true, message: post });
+    return sendJSON(res, { ok: true });
   }
 
   return sendJSON(res, { error: "unknown endpoint" }, 404);

@@ -25,6 +25,9 @@
     return PAGES[h] ? h : '/overview';
   }
 
+  // Any page that isn't the Discord shell is DOI-only.
+  const PUBLIC_PATHS = new Set(['/overview']);
+
   function render() {
     // auth gate before anything else. If we have a token but the profile
     // hasn't arrived yet, don't flash the gate — doi.js will re-render
@@ -32,15 +35,29 @@
     if (window.DOI && !window.DOI.isAuthed()) {
       const hasToken = !!localStorage.getItem('doi.token');
       if (!hasToken) { window.DOI.renderGate('login'); return; }
-      // token pending validation — fall through and let the home shell render
-      // the "loading" state, or the gate will replace it on 401
+      // token pending validation — fall through
     }
 
-    const path = currentPath();
+    let path = currentPath();
+    // DOI-only gating: bounce non-DOI operatives back to home if they try
+    // to reach a restricted page.
+    if (!PUBLIC_PATHS.has(path) && window.DOI && window.DOI.isAuthed() && !window.DOI.isDOI()) {
+      path = '/overview';
+      if (location.hash !== '#' + path) history.replaceState(null, '', '#' + path);
+    }
+
     const page = PAGES[path];
 
     // discord-shell home gets full-bleed body
     document.body.classList.toggle('doi-home', path === '/overview');
+
+    // update top-nav visibility (hide restricted links for non-DOI operatives)
+    const isDOI = window.DOI && window.DOI.isDOI && window.DOI.isDOI();
+    $$('.top-nav a').forEach(a => {
+      const sec = a.dataset.section;
+      const restricted = sec !== 'overview';
+      a.style.display = restricted && !isDOI ? 'none' : '';
+    });
 
     content.innerHTML = page.html();
     content.scrollIntoView({ block: 'start' });
@@ -51,7 +68,9 @@
     buildTOC();
     wireInteractions();
 
-    // wire the DOI shell interactions on the home page
+    // wire the DOI shell interactions on the home page — ONCE per render.
+    // wireHome must NOT call back into render() (would cause a loop);
+    // doi.js re-renders in-place via its own path.
     if (path === '/overview' && window.DOI && typeof window.DOI.wireHome === 'function') {
       window.DOI.wireHome(content);
     }
