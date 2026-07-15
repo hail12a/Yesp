@@ -13,9 +13,9 @@
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
   const TOKEN_KEY = 'doi.token';
-  const LOGO_URL       = 'assets/img/doi-logo.png?v=20260715g';
-  const HERO_TEAM_URL  = 'assets/img/hero-team.png?v=20260715g';
-  const HERO_GATE_URL  = 'assets/img/hero-gate.png?v=20260715g';
+  const LOGO_URL       = 'assets/img/doi-logo.png?v=20260715h';
+  const HERO_TEAM_URL  = 'assets/img/hero-team.png?v=20260715h';
+  const HERO_GATE_URL  = 'assets/img/hero-gate.png?v=20260715h';
   window.DOI_LOGO_URL = LOGO_URL;
 
   /* ---------- CACHE ---------- */
@@ -109,6 +109,18 @@
     const day = Math.floor(d / 86_400_000);
     if (day < 7) return day + 'd';
     return new Date(ts).toLocaleDateString();
+  }
+  // Discord-style stamps
+  function sameDay(a, b) { const x = new Date(a), y = new Date(b); return x.getFullYear()===y.getFullYear() && x.getMonth()===y.getMonth() && x.getDate()===y.getDate(); }
+  function clock(ts) { return new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
+  function fmtStamp(ts) {
+    const now = Date.now();
+    if (sameDay(ts, now)) return 'Today at ' + clock(ts);
+    if (sameDay(ts, now - 86_400_000)) return 'Yesterday at ' + clock(ts);
+    return new Date(ts).toLocaleDateString(undefined, { month:'numeric', day:'numeric', year:'2-digit' }) + ', ' + clock(ts);
+  }
+  function fmtDivider(ts) {
+    return new Date(ts).toLocaleDateString(undefined, { month:'long', day:'numeric', year:'numeric' });
   }
   function avatarHTML(name, dataUrl, size) {
     const initial = (name || '?').trim().charAt(0).toUpperCase();
@@ -487,7 +499,7 @@
     const msgs = cache.chat[key] || [];
     const head = `<span class="doi-hash">#</span><h2>${esc(ch.name)}</h2><span class="doi-topic">${esc(ch.topic || '')}</span>`;
     const body = `<div class="doi-main-body" id="doi-msgs">
-      ${msgs.length ? msgs.map(msgHTML).join('') : '<div class="doi-empty">no messages · be the first</div>'}
+      ${renderMessages(msgs, channelWelcomeHTML(ch))}
     </div>${composerHTML(ch.name)}`;
     return `<div class="doi-main-head">${head}</div>${body}`;
   }
@@ -582,7 +594,7 @@
     const head = `${avatarHTML(other.name, other.avatar, 24)}<h2 style="margin-left:8px">${esc(other.name)}</h2>
       <button class="doi-topic doi-topic-btn" data-open-profile="${esc(otherKey)}">view profile</button>`;
     const body = `<div class="doi-main-body" id="doi-msgs">
-      ${msgs.length ? msgs.map(dmMsgHTML).join('') : `<div class="doi-empty" style="padding:40px 20px">say hi to ${esc(other.name)}</div>`}
+      ${renderMessages(msgs, dmWelcomeHTML(other))}
     </div>${composerHTML(other.name, true)}`;
     return `<div class="doi-main-head doi-main-head-dm">${head}</div>${body}`;
   }
@@ -598,34 +610,72 @@
       </button>
     </div>`;
   }
-  function dmMsgHTML(m) {
-    const mine = cache.profile && (m.fromKey === cache.profile.key || m.from === cache.profile.name);
-    return `<div class="doi-msg" data-mid="${esc(m.id)}" data-mine="${mine?'1':''}">
-      ${avatarHTML(m.from, null, 40)}
-      <div class="doi-msg-body">
-        <div class="doi-msg-head">
-          <span class="doi-msg-name">${esc(m.from)}</span>
-          <span class="doi-msg-time">${timeAgo(m.ts)}${m.edited ? ' · <span class="doi-msg-edited">(edited)</span>':''}</span>
-        </div>
-        <div class="doi-msg-text">${esc(m.text)}</div>
-      </div>
-      ${msgActions(mine)}
-    </div>`;
+
+  // Normalize channel messages ({author, authorKey}) and DMs ({from, fromKey})
+  function normMsg(m) {
+    return {
+      id: m.id, ts: m.ts, text: m.text, edited: m.edited || 0,
+      name: m.author || m.from || '?',
+      key:  m.authorKey || m.fromKey || null,
+    };
+  }
+  const GROUP_GAP = 7 * 60_000; // messages from same author within 7 min collapse
+
+  // Discord-style list: date dividers + author-grouped message runs.
+  function renderMessages(rawList, welcomeHTML) {
+    const me = cache.profile || {};
+    let html = welcomeHTML || '';
+    let prev = null;
+    for (const raw of rawList) {
+      const m = normMsg(raw);
+      const mine = (m.key && m.key === me.key) || m.name === me.name;
+      const isOfficer = m.name === 'DOI';
+      if (!prev || !sameDay(prev.ts, m.ts)) {
+        html += `<div class="doi-date-divider"><span>${esc(fmtDivider(m.ts))}</span></div>`;
+        prev = null; // date change always starts a new group
+      }
+      const grouped = prev && prev.name === m.name && (m.ts - prev.ts) < GROUP_GAP;
+      if (grouped) {
+        html += `<div class="doi-msg doi-msg-compact" data-mid="${esc(m.id)}" data-mine="${mine?'1':''}">
+          <span class="doi-msg-gutter">${esc(clock(m.ts))}</span>
+          <div class="doi-msg-body">
+            <div class="doi-msg-text">${esc(m.text)}${m.edited ? ' <span class="doi-msg-edited">(edited)</span>':''}</div>
+          </div>
+          ${msgActions(mine)}
+        </div>`;
+      } else {
+        html += `<div class="doi-msg doi-msg-head-row" data-mid="${esc(m.id)}" data-mine="${mine?'1':''}">
+          ${avatarHTML(m.name, null, 40)}
+          <div class="doi-msg-body">
+            <div class="doi-msg-head">
+              <span class="doi-msg-name ${isOfficer?'doi-officer':''}">${esc(m.name)}</span>
+              <span class="doi-msg-time">${esc(fmtStamp(m.ts))}${m.edited ? ' <span class="doi-msg-edited">(edited)</span>':''}</span>
+            </div>
+            <div class="doi-msg-text">${esc(m.text)}</div>
+          </div>
+          ${msgActions(mine)}
+        </div>`;
+      }
+      prev = m;
+    }
+    return html;
   }
 
-  function msgHTML(m) {
-    const isOfficer = m.author === 'DOI' || /^Cmdr\./i.test(m.author);
-    const mine = cache.profile && (m.authorKey === cache.profile.key || m.author === cache.profile.name);
-    return `<div class="doi-msg" data-mid="${esc(m.id)}" data-mine="${mine?'1':''}">
-      ${avatarHTML(m.author, null, 40)}
-      <div class="doi-msg-body">
-        <div class="doi-msg-head">
-          <span class="doi-msg-name ${isOfficer?'doi-officer':''}">${esc(m.author)}</span>
-          <span class="doi-msg-time">${timeAgo(m.ts)}${m.edited ? ' · <span class="doi-msg-edited">(edited)</span>':''}</span>
-        </div>
-        <div class="doi-msg-text">${esc(m.text)}</div>
+  function dmWelcomeHTML(other) {
+    return `<div class="doi-chat-welcome">
+      ${avatarHTML(other.name, other.avatar, 80)}
+      <h1>${esc(other.name)}</h1>
+      <p>This is the beginning of your direct message history with <b>${esc(other.name)}</b>.</p>
+      <div class="doi-chat-welcome-actions">
+        <button class="doi-pp-btn doi-btn-cancel" data-open-profile="${esc(other.key || '')}">View Profile</button>
       </div>
-      ${msgActions(mine)}
+    </div>`;
+  }
+  function channelWelcomeHTML(ch) {
+    return `<div class="doi-chat-welcome">
+      <div class="doi-chat-welcome-hash">#</div>
+      <h1>Welcome to #${esc(ch.name)}!</h1>
+      <p>${esc(ch.topic || 'This is the start of the #' + ch.name + ' channel.')}</p>
     </div>`;
   }
   function composerHTML(label, isDM) {
