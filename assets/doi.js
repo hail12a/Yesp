@@ -13,9 +13,9 @@
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
   const TOKEN_KEY = 'doi.token';
-  const LOGO_URL       = 'assets/img/doi-logo.png?v=20260715e';
-  const HERO_TEAM_URL  = 'assets/img/hero-team.png?v=20260715e';
-  const HERO_GATE_URL  = 'assets/img/hero-gate.png?v=20260715e';
+  const LOGO_URL       = 'assets/img/doi-logo.png?v=20260715f';
+  const HERO_TEAM_URL  = 'assets/img/hero-team.png?v=20260715f';
+  const HERO_GATE_URL  = 'assets/img/hero-gate.png?v=20260715f';
   window.DOI_LOGO_URL = LOGO_URL;
 
   /* ---------- CACHE ---------- */
@@ -91,6 +91,7 @@
     dms:            () => jfetch('/api/doi/dms?token=' + q(cache.token || '')),
     dm:  (otherKey, since) => jfetch('/api/doi/dms/' + q(otherKey) + '?token=' + q(cache.token || '') + (since ? '&since=' + since : '')),
     sendDM: (otherKey, text) => jfetch('/api/doi/dms/' + q(otherKey), { method: 'POST', body: JSON.stringify({ token: cache.token, text }) }),
+    closeDM: (otherKey) => jfetch('/api/doi/dms/' + q(otherKey) + '/close', { method: 'POST', body: JSON.stringify({ token: cache.token }) }),
 
     publicProfile: (userKey) => jfetch('/api/doi/profile/' + q(userKey) + '?token=' + q(cache.token || '')),
   };
@@ -123,40 +124,44 @@
   function isDOI() { return isAuthed() && cache.profile.name === 'DOI'; }
   window.DOI_IS_DOI = isDOI;
 
+  function applyTheme() {
+    // Non-owners are always Discord-dark. Owner can pick Insurgency.
+    const wantIns = isDOI() && cache.profile && cache.profile.theme === 'insurgency';
+    document.body.classList.toggle('doi-theme-insurgency', !!wantIns);
+  }
+
   /* ---------- LOGIN GATE ---------- */
   function renderGate(mode = 'login', err = '') {
     const gate = $('#doiGate');
     if (!gate) return;
     gate.hidden = false;
     gate.innerHTML = `
-      <div class="doi-gate-bg" style="background-image:url('${HERO_GATE_URL}')"></div>
       <div class="doi-gate-inner">
         <div class="doi-gate-badge"><img src="${LOGO_URL}" alt="DOI"/></div>
-        <h1>Department of Insurgency</h1>
-        <p class="doi-motto">Dismantling Greed</p>
-        <p class="doi-classified"><b>◆ CLASSIFIED</b> · Site-CI Terminal · Authorization Required</p>
+        <h1>${mode==='login' ? 'Welcome back!' : 'Create an account'}</h1>
+        <p class="doi-motto">${mode==='login' ? "We're so excited to see you again." : 'Join the Department of Insurgency network.'}</p>
         <div class="doi-tabs" role="tablist">
           <button data-mode="login" class="${mode==='login'?'active':''}">Sign In</button>
           <button data-mode="register" class="${mode==='register'?'active':''}">Register</button>
         </div>
         <form id="doiGateForm" autocomplete="off">
           <div class="doi-field">
-            <label>Callsign</label>
+            <label>Username</label>
             <input name="user" required minlength="3" maxlength="16" pattern="[A-Za-z0-9_]{3,16}"
               placeholder="e.g. Vector_7" autocomplete="off"/>
             <div class="doi-hint">3–16 chars · letters, numbers, underscore.</div>
           </div>
           <div class="doi-field">
-            <label>Cipher</label>
+            <label>Password</label>
             <input name="pass" type="password" required minlength="4" placeholder="At least 4 characters"/>
             <div class="doi-hint">Hashed on the server. Never logged.</div>
           </div>
           ${err ? `<div class="doi-gate-err">${esc(err)}</div>` : ''}
           <button class="doi-gate-submit" type="submit">
-            ${mode==='login' ? '▸ ACCESS TERMINAL' : '▸ REGISTER OPERATIVE'}
+            ${mode==='login' ? 'Log In' : 'Continue'}
           </button>
         </form>
-        <div class="doi-gate-foot">// SESSION-DOI · SERVER-BACKED · SPARKEDHOST</div>
+        <div class="doi-gate-foot">Department of Insurgency · same-origin server</div>
       </div>`;
     $$('.doi-tabs button', gate).forEach(b => b.addEventListener('click', () => renderGate(b.dataset.mode)));
     $('#doiGateForm', gate).addEventListener('submit', async e => {
@@ -173,6 +178,7 @@
         cache.token = r.token; localStorage.setItem(TOKEN_KEY, cache.token);
         const me = await api.me();
         cache.profile = me.profile;
+        applyTheme();
         // fetch initial data before rendering the shell
         await Promise.all([loadServers(), loadFriends()]);
         gate.hidden = true;
@@ -418,12 +424,13 @@
         <div class="doi-dm-name">${esc(other.name)}</div>
         ${c.lastText ? `<div class="doi-dm-last">${esc(c.lastText.slice(0, 34))}</div>` : ''}
       </div>
+      <button class="doi-dm-close" data-dm-close="${esc(other.key)}" title="Close DM">×</button>
     </div>`;
   }
 
   function userPanel(p) {
     return `<div class="doi-userpanel">
-      <div class="doi-uleft" data-shell-openprofile data-pkey="${esc(p.key || (p.name||'').toLowerCase())}">
+      <div class="doi-uleft" data-shell-opensettings title="Edit your account">
         ${avatarHTML(p.name, p.avatar, 36)}
         <div class="doi-uinfo">
           <div class="doi-uname">${esc(p.name)}${p.isDOI ? ' <span class="doi-badge-owner">OWNER</span>':''}</div>
@@ -723,24 +730,79 @@
           : friendState === 'incoming' ? `<button class="doi-pp-btn doi-btn-primary" data-pp-accept="${esc(prof.key)}">Accept Request</button>
                                           <button class="doi-pp-btn doi-btn-cancel" data-pp-cancel="${esc(prof.key)}">Decline</button>`
           : `<button class="doi-pp-btn doi-btn-primary" data-pp-add="${esc(prof.name)}">Send Friend Request</button>`}`;
+    const isSelf = friendState === 'self';
+    const bioText = prof.bio || (isSelf ? 'Click here to add a bio…' : '');
     inner.innerHTML = `
-      <div class="doi-pp">
-        <div class="doi-pp-banner" style="background:${esc(prof.bannerColor)}"></div>
-        <div class="doi-pp-avatarwrap">${avatarHTML(prof.name, prof.avatar, 96)}
-          <span class="doi-pp-online"></span>
+      <button class="doi-pp-close" data-close-modal title="Close">×</button>
+      <div class="doi-pp-shell">
+        <div class="doi-pp-col">
+          <div class="doi-pp">
+            <div class="doi-pp-banner ${isSelf?'editable':''}" data-pp-editbanner style="background:${esc(prof.bannerColor)}"></div>
+            <div class="doi-pp-avatarwrap">${avatarHTML(prof.name, prof.avatar, 96)}
+              <span class="doi-pp-online"></span>
+            </div>
+            <div class="doi-pp-body">
+              <div class="doi-pp-namebox">
+                <h2 class="doi-pp-name">${esc(prof.name)}${prof.isDOI ? ' <span class="doi-badge-owner">OWNER</span>':''}</h2>
+                <div class="doi-pp-sub">${esc(prof.tag)} ${prof.pronouns ? '· ' + esc(prof.pronouns) : ''}</div>
+              </div>
+              <div class="doi-pp-actions">${actions}</div>
+              <div class="doi-pp-sec">About Me</div>
+              <div class="doi-pp-bio ${isSelf?'editable':''}" data-pp-editbio>${esc(bioText)}</div>
+              <div class="doi-pp-sec">Member Since</div>
+              <div class="doi-pp-mem">${new Date(prof.joined).toLocaleDateString(undefined, {year:'numeric',month:'long',day:'numeric'})}</div>
+            </div>
+          </div>
         </div>
-        <div class="doi-pp-body">
-          <h2 class="doi-pp-name">${esc(prof.name)}${prof.isDOI ? ' <span class="doi-badge-owner">OWNER</span>':''}</h2>
-          <div class="doi-pp-sub">${esc(prof.name)} ${prof.pronouns ? '· ' + esc(prof.pronouns) : ''}</div>
-          <div class="doi-pp-tag">${esc(prof.tag)}</div>
-          <div class="doi-pp-actions">${actions}</div>
-          ${prof.bio ? `<div class="doi-pp-sec">About Me</div><div class="doi-pp-bio">${esc(prof.bio)}</div>` : ''}
-          <div class="doi-pp-sec">Member Since</div>
-          <div class="doi-pp-mem">${new Date(prof.joined).toLocaleDateString(undefined, {year:'numeric',month:'long',day:'numeric'})}</div>
+        <div class="doi-pp-col doi-pp-widgets">
+          <div class="doi-pp-tabs">
+            <button class="doi-pp-tab active">Board</button>
+            <button class="doi-pp-tab">Activity</button>
+            <button class="doi-pp-tab">Wishlist</button>
+          </div>
+          <div class="doi-pp-widgets-title">Customize your profile with Widgets</div>
+          <div class="doi-pp-widgets-sub">Choose from our library of Widgets to share more about yourself and your interests.</div>
+          <div class="doi-pp-widget-grid">
+            <div class="doi-pp-widget doi-pp-widget-add">+</div>
+            <div class="doi-pp-widget doi-pp-widget-add">+</div>
+            <div class="doi-pp-widget doi-pp-widget-add">+</div>
+            <div class="doi-pp-widget doi-pp-widget-add">+</div>
+          </div>
         </div>
-      </div>
-      <div class="doi-modal-actions"><button class="doi-btn-cancel" data-close-modal>Close</button></div>`;
+      </div>`;
     inner.querySelector('[data-close-modal]').addEventListener('click', () => modal.hidden = true);
+    // click-outside dismisses
+    modal.onclick = e => { if (e.target === modal) modal.hidden = true; };
+    // banner editable (self)
+    if (isSelf) {
+      inner.querySelector('[data-pp-editbanner]').addEventListener('click', () => {
+        modal.hidden = true;
+        openSettings('profile');
+      });
+      // bio editable inline
+      const bioEl = inner.querySelector('[data-pp-editbio]');
+      bioEl.addEventListener('click', () => {
+        const cur = (cache.profile && cache.profile.bio) || '';
+        const ta = document.createElement('textarea');
+        ta.className = 'doi-pp-bio-edit';
+        ta.maxLength = 200;
+        ta.value = cur;
+        bioEl.replaceWith(ta);
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+        const commit = async () => {
+          const v = ta.value.slice(0, 200);
+          if (v === cur) { openProfilePopup(userKey); return; }
+          try {
+            const r = await api.saveProfile({ bio: v });
+            cache.profile = r.profile;
+            openProfilePopup(userKey);
+          } catch (er) { alert('Save failed: ' + er.message); }
+        };
+        ta.addEventListener('blur', commit, { once: true });
+        ta.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); openProfilePopup(userKey); } });
+      });
+    }
     inner.querySelector('[data-pp-dm]')?.addEventListener('click', async () => { modal.hidden = true; await openDM(prof.key); });
     inner.querySelector('[data-pp-add]')?.addEventListener('click', async e => {
       try { await api.sendFriendReq(e.target.dataset.ppAdd); await Promise.all([loadFriends(), loadFriendRequests()]); openProfilePopup(userKey); }
@@ -850,10 +912,32 @@
           <button type="button" class="doi-btn-primary" id="doiUSPrivacySave">Save Changes</button>
         </div>`;
     } else if (section === 'appearance') {
+      const owner = !!p.isDOI;
+      const theme = p.theme || 'discord';
       body = `
         <h2>Appearance</h2>
-        <p style="color:#a0a0a0">Theme is CI-dark by default. Toggle light/dark from the topbar's ☀/🌙 button.</p>
-        <p style="color:#a0a0a0">More appearance controls will land here.</p>`;
+        ${owner ? `
+          <div class="doi-us-field">
+            <label>Theme (Owner Only)</label>
+            <div class="doi-theme-picker">
+              <div class="doi-theme-choice ${theme==='discord'?'active':''}" data-us-theme="discord">
+                <div class="doi-theme-choice-preview discord"></div>
+                <div class="doi-theme-choice-label">Discord</div>
+              </div>
+              <div class="doi-theme-choice ${theme==='insurgency'?'active':''}" data-us-theme="insurgency">
+                <div class="doi-theme-choice-preview insurgency"></div>
+                <div class="doi-theme-choice-label">Insurgency</div>
+              </div>
+            </div>
+            <div class="doi-us-hint">Users always see the Discord theme. Only the owner can switch to Insurgency.</div>
+          </div>
+        ` : `
+          <div class="doi-us-field">
+            <label>Theme</label>
+            <div class="doi-us-val">Discord Dark</div>
+            <div class="doi-us-hint">Alternate themes are owner-only.</div>
+          </div>
+        `}`;
     } else {
       body = `
         <h2>About DOI</h2>
@@ -880,8 +964,18 @@
         <button class="doi-us-close" data-close-modal title="Close (ESC)">×</button>
       </div>`;
     modal.querySelector('[data-close-modal]').addEventListener('click', () => modal.hidden = true);
-    modal.addEventListener('click', e => { if (e.target === modal) modal.hidden = true; }, { once: true });
+    modal.onclick = e => { if (e.target === modal) modal.hidden = true; };
     $$('[data-us-cat]', modal).forEach(b => b.addEventListener('click', () => renderSettings(b.dataset.usCat)));
+    // theme picker (owner only)
+    $$('[data-us-theme]', modal).forEach(el => el.addEventListener('click', async () => {
+      const t = el.dataset.usTheme;
+      try {
+        const r = await api.saveProfile({ theme: t });
+        cache.profile = r.profile;
+        applyTheme();
+        renderSettings('appearance');
+      } catch (e) { alert('Save failed: ' + e.message); }
+    }));
     // Section wiring
     if (section === 'account') {
       modal.querySelector('[data-us-signout]')?.addEventListener('click', () => {
@@ -1176,6 +1270,18 @@
       rerenderMainSoft();
     }));
 
+    // close DM (X on hover)
+    $$('[data-dm-close]', container).forEach(b => b.addEventListener('click', async e => {
+      e.stopPropagation();
+      const key = b.dataset.dmClose;
+      try {
+        await api.closeDM(key);
+        if (state.homeView === 'dm' && state.dmWith === key) { state.homeView = 'friends'; state.dmWith = null; }
+        await loadDMs();
+        rerenderShell();
+      } catch (er) { alert('Close failed: ' + er.message); }
+    }));
+
     // new DM prompt
     $$('[data-shell-newdm]', container).forEach(el => el.addEventListener('click', async () => {
       const call = prompt('Callsign of the operative to message:');
@@ -1359,6 +1465,7 @@
     try {
       const r = await api.me();
       cache.profile = r.profile;
+      applyTheme();
       // preload core data once, then let render happen
       await Promise.all([loadServers(), loadFriends()]);
       // pre-select flagship server → first channel so users land in something usable

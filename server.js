@@ -145,7 +145,7 @@ const WORLD_TTL = 15000;
 
 /* ---- DOI network (servers, channels, chat, friends, DMs, profiles) ---- */
 const DOI_FILE = path.join(__dirname, "doi.json");
-let doiStore = { servers: {}, friends: {}, friendReqs: {}, dms: {}, profiles: {} };
+let doiStore = { servers: {}, friends: {}, friendReqs: {}, dms: {}, profiles: {}, hiddenDMs: {} };
 try {
   const loaded = JSON.parse(fs.readFileSync(DOI_FILE, "utf8"));
   if (loaded && typeof loaded === "object") {
@@ -154,6 +154,7 @@ try {
     doiStore.friendReqs = (loaded.friendReqs && typeof loaded.friendReqs === "object") ? loaded.friendReqs : {};
     doiStore.dms        = (loaded.dms        && typeof loaded.dms        === "object") ? loaded.dms        : {};
     doiStore.profiles   = (loaded.profiles   && typeof loaded.profiles   === "object") ? loaded.profiles   : {};
+    doiStore.hiddenDMs  = (loaded.hiddenDMs  && typeof loaded.hiddenDMs  === "object") ? loaded.hiddenDMs  : {};
   }
 } catch (_) {}
 
@@ -220,6 +221,7 @@ function doiProfile(key) {
     avatar: p.avatar || null,
     bannerColor: p.bannerColor || defaultBanner(key),
     messagePrivacy: p.messagePrivacy || "anyone",   // "anyone" | "friends"
+    theme: p.theme || "discord",                    // "discord" | "insurgency" (owner-only meaningful)
     joined: (rec && rec.created) || Date.now(),
     isDOI: !!(rec && rec.user === "DOI")
   };
@@ -477,6 +479,7 @@ async function handleApi(req, res, urlPath, query) {
     if (typeof m.pronouns === "string")      p.pronouns = m.pronouns.slice(0, 20);
     if (typeof m.bannerColor === "string" && /^#[0-9a-fA-F]{3,8}$/.test(m.bannerColor)) p.bannerColor = m.bannerColor;
     if (m.messagePrivacy === "friends" || m.messagePrivacy === "anyone") p.messagePrivacy = m.messagePrivacy;
+    if ((m.theme === "discord" || m.theme === "insurgency") && u.name === "DOI") p.theme = m.theme;
     if (typeof m.avatar === "string") { if (m.avatar.length < 260_000) p.avatar = m.avatar; }
     doiStore.profiles[u.key] = p;
     saveDoi();
@@ -816,18 +819,44 @@ async function handleApi(req, res, urlPath, query) {
     const tok = query.get("token") || "";
     const u = doiUserFromToken(tok);
     if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    const hidden = new Set(doiStore.hiddenDMs[u.key] || []);
+    const seen = new Set();
     const convos = [];
+    // 1) all conversations with any past messages
     for (const pk in doiStore.dms) {
       const parts = pk.split("|");
       if (parts.includes(u.key)) {
         const other = parts[0] === u.key ? parts[1] : parts[0];
+        if (hidden.has(other)) continue;
         const msgs = doiStore.dms[pk] || [];
         const last = msgs[msgs.length - 1] || null;
         convos.push({ other: doiProfile(other), lastTs: last ? last.ts : 0, lastText: last ? last.text : "" });
+        seen.add(other);
       }
+    }
+    // 2) friends who don't have an active conversation yet (they show as
+    //    placeholder DM rows until the user closes them with the X)
+    for (const fk of (doiStore.friends[u.key] || [])) {
+      if (seen.has(fk) || hidden.has(fk)) continue;
+      convos.push({ other: doiProfile(fk), lastTs: 0, lastText: "" });
     }
     convos.sort((a, b) => b.lastTs - a.lastTs);
     return sendJSON(res, { ok: true, dms: convos });
+  }
+  // POST /api/doi/dms/:otherKey/close  → hide from DM list
+  {
+    const mmc = urlPath.match(/^\/api\/doi\/dms\/([^/]+)\/close$/);
+    if (mmc && req.method === "POST") {
+      const m = await readBody(req);
+      const u = doiUserFromToken(m.token);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const otherKey = mmc[1].toLowerCase();
+      const list = doiStore.hiddenDMs[u.key] || [];
+      if (!list.includes(otherKey)) list.push(otherKey);
+      doiStore.hiddenDMs[u.key] = list;
+      saveDoi();
+      return sendJSON(res, { ok: true });
+    }
   }
   {
     const mm = urlPath.match(/^\/api\/doi\/dms\/([^/]+)$/);
@@ -837,6 +866,10 @@ async function handleApi(req, res, urlPath, query) {
       if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
       const otherKey = mm[1].toLowerCase();
       if (!accounts.users[otherKey]) return sendJSON(res, { error: "not found" }, 404);
+      // opening a DM un-hides it
+      const hid = doiStore.hiddenDMs[u.key] || [];
+      const idx = hid.indexOf(otherKey);
+      if (idx !== -1) { hid.splice(idx, 1); doiStore.hiddenDMs[u.key] = hid; saveDoi(); }
       const pk = dmPairKey(u.key, otherKey);
       const since = parseInt(query.get("since") || "0", 10) || 0;
       const all = doiStore.dms[pk] || [];
