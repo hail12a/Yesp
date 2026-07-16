@@ -562,7 +562,9 @@
     }
     const other = c.other || {};
     const active = state.homeView === 'dm' && state.dmWith === other.key;
-    return `<div class="doi-dm-row ${active?'active':''}" data-shell-nav="dm" data-dm-key="${esc(other.key)}" data-title="${esc((other.name||'').toLowerCase())}">
+    const otherPlate = equippedAsset(other, 'nameplate');
+    return `<div class="doi-dm-row ${active?'active':''} ${otherPlate?'doi-np-host':''}" data-shell-nav="dm" data-dm-key="${esc(other.key)}" data-title="${esc((other.name||'').toLowerCase())}">
+      ${otherPlate ? `<span class="doi-np-plate" style="background-image:url('${esc(otherPlate)}')"></span>` : ''}
       ${avatarHTML(other.name, other.avatar, 32)}
       <div class="doi-dm-info">
         <div class="doi-dm-name">${esc(other.name)}</div>
@@ -1018,11 +1020,13 @@
     const deco   = equippedAsset(prof, 'decoration');
     const effect = equippedAsset(prof, 'effect');
     const frame  = equippedAsset(prof, 'frame');
+    const plate  = equippedAsset(prof, 'nameplate');
     inner.innerHTML = `
       <button class="doi-pp-close" data-close-modal title="Close">×</button>
       <div class="doi-pp-shell">
         <div class="doi-pp-col">
           <div class="doi-pp">
+            <span class="doi-bubbles-scoped" aria-hidden="true">${scopedBubbles(8)}</span>
             ${effect ? `<span class="doi-pp-effect" style="background-image:url('${esc(effect)}')"></span>` : ''}
             ${frame  ? `<span class="doi-pp-effect" style="background-image:url('${esc(frame)}');mix-blend-mode:normal;background-size:contain"></span>` : ''}
             <div class="doi-pp-banner ${isSelf?'editable':''}" data-pp-editbanner style="background:${esc(prof.bannerColor)}"></div>
@@ -1031,7 +1035,8 @@
               <span class="doi-pp-online"></span>
             </div>
             <div class="doi-pp-body">
-              <div class="doi-pp-namebox">
+              <div class="doi-pp-namebox ${plate?'has-plate':''}">
+                ${plate ? `<span class="doi-pp-nameplate" style="background-image:url('${esc(plate)}')"></span>` : ''}
                 <h2 class="doi-pp-name">${esc(prof.name)}${prof.isDOI ? ' <span class="doi-badge-owner">OWNER</span>':''}</h2>
                 <div class="doi-pp-sub">${esc(prof.tag)} ${prof.pronouns ? '· ' + esc(prof.pronouns) : ''}</div>
               </div>
@@ -1342,9 +1347,13 @@
     const equipped = me.equipped && me.equipped[eqSlot] === item.id;
     let preview;
     if (item.kind === 'decoration') {
-      preview = item.image
-        ? `<div class="doi-shop-deco-ring" style="background-image:url('${esc(item.image)}')"></div>`
-        : `<div class="doi-shop-deco-ring"></div>`;
+      preview = `<div class="doi-shop-deco-ring"${item.image ? ` style="background-image:url('${esc(item.image)}')"` : ''}></div>`;
+    } else if (item.kind === 'nameplate') {
+      preview = `<div class="doi-shop-nameplate-prev"${item.image ? ` style="background-image:url('${esc(item.image)}')"` : ''}>${esc((me.name || 'Operative'))}</div>`;
+    } else if (item.kind === 'frame') {
+      preview = `<div class="doi-shop-frame-prev">${item.image ? `<span class="doi-shop-frame-img" style="background-image:url('${esc(item.image)}')"></span>` : ''}<span class="doi-shop-frame-face"></span></div>`;
+    } else if (item.kind === 'effect') {
+      preview = `<div class="doi-shop-effect-prev">${item.image ? `<span class="doi-shop-effect-img" style="background-image:url('${esc(item.image)}')"></span>` : '<span class="doi-bubbles-scoped" aria-hidden="true">' + scopedBubbles(6) + '</span>'}</div>`;
     } else {
       preview = item.image
         ? `<img src="${esc(item.image)}" alt=""/>`
@@ -1394,6 +1403,7 @@
     modal.innerHTML = `
       <div class="doi-shop">
         <div class="doi-shop-hero">
+          <span class="doi-bubbles-scoped" aria-hidden="true">${scopedBubbles(12)}</span>
           <p class="doi-shop-eyebrow">Novalis Shop</p>
           <h1>Make it yours</h1>
           <p>Avatar decorations, profile frames, animated effects and nameplates. ${isOwner ? 'You own this shop — add or remove anything below.' : 'Owned items can be equipped from your profile.'}</p>
@@ -1487,6 +1497,19 @@
     document.body.appendChild(host);
   }
   window.__doiMountBubbles = mountBubbles;
+
+  // Small inline bubble field for scoped containers (shop hero, profile card).
+  function scopedBubbles(n) {
+    let html = '';
+    for (let i = 0; i < n; i++) {
+      const size = 8 + (i * 5) % 26;
+      const left = (i * 37) % 100;
+      const dur = 9 + (i * 4) % 12;
+      const delay = (i * 1.3) % 10;
+      html += `<b style="width:${size}px;height:${size}px;left:${left}%;animation-duration:${dur}s;animation-delay:-${delay}s"></b>`;
+    }
+    return html;
+  }
 
   // Resolve an equipped item's image (global shop catalog) for a profile.
   function equippedAsset(prof, kind) {
