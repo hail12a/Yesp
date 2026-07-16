@@ -176,11 +176,12 @@
   }
 
   function applyTheme() {
-    // Midnight (liquid glass) is the default for everyone. Users can switch to
-    // classic Discord-dark; only the owner can pick Insurgency.
+    // Everyone runs Midnight (liquid glass). Only the owner may switch to the
+    // Classic or Insurgency looks — for users those themes are off-site.
     const themeName = (cache.profile && cache.profile.theme) || 'midnight';
     const wantIns = isDOI() && themeName === 'insurgency';
-    const wantMid = !wantIns && themeName !== 'discord';
+    const wantClassic = isDOI() && themeName === 'discord';
+    const wantMid = !wantIns && !wantClassic;
     document.body.classList.toggle('doi-theme-insurgency', !!wantIns);
     document.body.classList.toggle('doi-theme-midnight', !!wantMid);
     if (typeof window.__doiMountBubbles === 'function') window.__doiMountBubbles();
@@ -569,9 +570,9 @@
     }
     const other = c.other || {};
     const active = state.homeView === 'dm' && state.dmWith === other.key;
-    const otherPlate = equippedAsset(other, 'nameplate');
-    return `<div class="doi-dm-row ${active?'active':''} ${otherPlate?'doi-np-host':''}" data-shell-nav="dm" data-dm-key="${esc(other.key)}" data-title="${esc((other.name||'').toLowerCase())}">
-      ${otherPlate ? `<span class="doi-np-plate" style="background-image:url('${esc(otherPlate)}')"></span>` : ''}
+    const np = nameplateBits(other);
+    return `<div class="doi-dm-row ${active?'active':''} ${np.cls}" data-shell-nav="dm" data-dm-key="${esc(other.key)}" data-title="${esc((other.name||'').toLowerCase())}">
+      ${np.html}
       ${avatarHTML(other.name, other.avatar, 32)}
       <div class="doi-dm-info">
         <div class="doi-dm-name">${esc(other.name)}</div>
@@ -703,7 +704,9 @@
   }
 
   function friendRow(f) {
-    return `<div class="doi-friend" data-open-profile="${esc(f.key || (f.name||'').toLowerCase())}">
+    const np = nameplateBits(f);
+    return `<div class="doi-friend ${np.cls}" data-open-profile="${esc(f.key || (f.name||'').toLowerCase())}">
+      ${np.html}
       ${avatarHTML(f.name, f.avatar, 40)}
       <div class="doi-friend-info">
         <div class="doi-friend-name">${esc(f.name)}</div>
@@ -823,11 +826,13 @@
           ${msgActions(mine)}
         </div>`;
       } else {
+        const kp = knownProfile(m.key, m.name);
+        const pkey = m.key || (m.name || '').toLowerCase();
         html += `<div class="doi-msg doi-msg-head-row" data-mid="${esc(m.id)}" data-mine="${mine?'1':''}">
-          ${avatarHTML(m.name, null, 40)}
+          <span class="doi-msg-avawrap" data-open-profile="${esc(pkey)}" title="View profile">${avatarHTML(m.name, kp && kp.avatar, 40)}</span>
           <div class="doi-msg-body">
             <div class="doi-msg-head">
-              <span class="doi-msg-name ${isOfficer?'doi-officer':''}">${esc(m.name)}</span>
+              <span class="doi-msg-name ${isOfficer?'doi-officer':''}" data-open-profile="${esc(pkey)}">${esc(m.name)}</span>
               <span class="doi-msg-time">${esc(fmtStamp(m.ts))}${m.edited ? ' <span class="doi-msg-edited">(edited)</span>':''}</span>
             </div>
             <div class="doi-msg-text">${esc(m.text)}</div>
@@ -1025,26 +1030,27 @@
           : `<button class="doi-pp-btn doi-btn-primary" data-pp-add="${esc(prof.name)}">Send Friend Request</button>`}`;
     const isSelf = friendState === 'self';
     const bioText = prof.bio || (isSelf ? 'Click here to add a bio…' : '');
-    const deco   = equippedAsset(prof, 'decoration');
-    const effect = equippedAsset(prof, 'effect');
-    const frame  = equippedAsset(prof, 'frame');
-    const plate  = equippedAsset(prof, 'nameplate');
+    const decoIt   = equippedItem(prof, 'decoration');
+    const effectIt = equippedItem(prof, 'effect');
+    const frameIt  = equippedItem(prof, 'frame');
+    const plateIt  = equippedItem(prof, 'nameplate');
+    const plateCss = nameplateStyle(plateIt);
     inner.innerHTML = `
       <button class="doi-pp-close" data-close-modal title="Close">×</button>
       <div class="doi-pp-shell">
         <div class="doi-pp-col">
           <div class="doi-pp">
             <span class="doi-bubbles-scoped" aria-hidden="true">${scopedBubbles(8)}</span>
-            ${effect ? `<span class="doi-pp-effect" style="background-image:url('${esc(effect)}')"></span>` : ''}
-            ${frame  ? `<span class="doi-pp-effect" style="background-image:url('${esc(frame)}');mix-blend-mode:normal;background-size:contain"></span>` : ''}
+            ${effectOverlayHTML(effectIt)}
+            ${frameOverlayHTML(frameIt)}
             <div class="doi-pp-banner ${isSelf?'editable':''}" data-pp-editbanner style="background:${esc(prof.bannerColor)}"></div>
             <div class="doi-pp-avatarwrap" style="position:relative">${avatarHTML(prof.name, prof.avatar, 96)}
-              ${deco ? `<span class="doi-pp-deco" style="background-image:url('${esc(deco)}')"></span>` : ''}
+              ${decoOverlayHTML(decoIt)}
               <span class="doi-pp-online"></span>
             </div>
             <div class="doi-pp-body">
-              <div class="doi-pp-namebox ${plate?'has-plate':''}">
-                ${plate ? `<span class="doi-pp-nameplate" style="background-image:url('${esc(plate)}')"></span>` : ''}
+              <div class="doi-pp-namebox ${plateIt?'has-plate':''}">
+                ${plateCss ? `<span class="doi-pp-nameplate" style="${plateCss}"></span>` : ''}
                 <h2 class="doi-pp-name">${esc(prof.name)}${prof.isDOI ? ' <span class="doi-badge-owner">OWNER</span>':''}</h2>
                 <div class="doi-pp-sub">${esc(prof.tag)} ${prof.pronouns ? '· ' + esc(prof.pronouns) : ''}</div>
               </div>
@@ -1577,12 +1583,94 @@
     return html;
   }
 
-  // Resolve an equipped item's image (global shop catalog) for a profile.
-  function equippedAsset(prof, kind) {
+  /* ---------- EQUIPPED COSMETICS (effects / decorations / frames / nameplates) ----------
+     Items with an image URL render it; items without one get a deterministic
+     procedural look (hashed hue + built-in animation) so cosmetics always
+     visibly apply — like Discord's, but generated client-side. */
+  function equippedItem(prof, kind) {
     const id = prof && prof.equipped && prof.equipped[kind];
     if (!id || !cache.shop || !cache.shop.items) return null;
-    const it = cache.shop.items.find(i => i.id === id);
+    return cache.shop.items.find(i => i.id === id) || null;
+  }
+  function equippedAsset(prof, kind) {
+    const it = equippedItem(prof, kind);
     return (it && it.image) ? it.image : null;
+  }
+  function itemHue(item) {
+    const s = (item && (item.id || item.name)) || '';
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return h % 360;
+  }
+  // Pick a built-in animation family from the item's name (fallback: hash).
+  function fxKind(item) {
+    const n = ((item && item.name) || '').toLowerCase();
+    if (/star|comet|night|galaxy|moon/.test(n)) return 'stars';
+    if (/bonsai|petal|blossom|sakura|kitty|rose|cherry/.test(n)) return 'petals';
+    if (/ember|fire|flame|vengeance|raven|nevermore|dark/.test(n)) return 'embers';
+    if (/bubble|drift|drop|rain|water|snow|frost/.test(n)) return 'bubbles';
+    return ['bubbles', 'stars', 'petals', 'embers'][itemHue(item) % 4];
+  }
+  function fxParticlesHTML(n) {
+    let html = '';
+    for (let i = 0; i < n; i++) {
+      const left = (i * 41 + 7) % 100;
+      const size = 5 + (i * 5) % 13;
+      const dur = 5 + (i * 3) % 8;
+      const delay = (i * 1.3) % 7;
+      html += `<b style="left:${left}%;width:${size}px;height:${size}px;animation-duration:${dur}s;animation-delay:-${delay}s"></b>`;
+    }
+    return html;
+  }
+  // Full-card overlay for profile EFFECTS.
+  function effectOverlayHTML(item) {
+    if (!item) return '';
+    if (item.image) return `<span class="doi-pp-effect" style="background-image:url('${esc(item.image)}')"></span>`;
+    return `<span class="doi-pp-effect doi-fx doi-fx-${fxKind(item)}" style="--fx-hue:${itemHue(item)}">${fxParticlesHTML(14)}</span>`;
+  }
+  // Ring around the avatar for DECORATIONS.
+  function decoOverlayHTML(item) {
+    if (!item) return '';
+    if (item.image) return `<span class="doi-pp-deco" style="background-image:url('${esc(item.image)}')"></span>`;
+    return `<span class="doi-pp-deco doi-deco-gen" style="--fx-hue:${itemHue(item)}"></span>`;
+  }
+  // Border layered over the card for FRAMES.
+  function frameOverlayHTML(item) {
+    if (!item) return '';
+    if (item.image) return `<span class="doi-pp-effect" style="background-image:url('${esc(item.image)}');mix-blend-mode:normal;background-size:contain"></span>`;
+    return `<span class="doi-frame-gen" style="--fx-hue:${itemHue(item)}"></span>`;
+  }
+  // Inline style for a NAMEPLATE strip (image, or hashed gradient fallback).
+  function nameplateStyle(item) {
+    if (!item) return null;
+    if (item.image) return `background-image:url('${esc(item.image)}')`;
+    const h = itemHue(item);
+    return `background:linear-gradient(90deg, hsla(${h},74%,46%,.95), hsla(${(h + 70) % 360},70%,44%,.5))`;
+  }
+  // Wrap a list row so an equipped nameplate paints behind it.
+  function nameplateBits(prof) {
+    const it = equippedItem(prof, 'nameplate');
+    if (!it) return { cls: '', html: '' };
+    return { cls: 'doi-np-host', html: `<span class="doi-np-plate" style="${nameplateStyle(it)}"></span>` };
+  }
+  // Best-known profile for a user key (self, friends, server members, DMs).
+  function knownProfile(key, name) {
+    const k = key || (name || '').toLowerCase();
+    if (!k) return null;
+    if (cache.profile && cache.profile.key === k) return cache.profile;
+    const f = (cache.friends || []).find(x => x.key === k);
+    if (f) return f;
+    for (const sid in cache.serversFull) {
+      const m = ((cache.serversFull[sid] || {}).members || []).find(x => x.key === k);
+      if (m) return m;
+    }
+    const dm = (cache.dms || []).find(c => c.other && c.other.key === k);
+    if (dm) return dm.other;
+    for (const gid in cache.groupsFull) {
+      const m = ((cache.groupsFull[gid] || {}).members || []).find(x => x.key === k);
+      if (m) return m;
+    }
+    return null;
   }
   async function preloadShop() {
     try { cache.shop = await api.shop(); } catch (_) {}
@@ -1683,21 +1771,21 @@
         <div class="doi-us-field">
           <label>Theme</label>
           <div class="doi-theme-picker">
-            <div class="doi-theme-choice ${theme==='midnight'?'active':''}" data-us-theme="midnight">
+            <div class="doi-theme-choice ${theme==='midnight'||!owner?'active':''}" data-us-theme="midnight">
               <div class="doi-theme-choice-preview midnight"></div>
-              <div class="doi-theme-choice-label">Midnight · Liquid Glass</div>
-            </div>
-            <div class="doi-theme-choice ${theme==='discord'?'active':''}" data-us-theme="discord">
-              <div class="doi-theme-choice-preview discord"></div>
-              <div class="doi-theme-choice-label">Classic Dark</div>
+              <div class="doi-theme-choice-label">Liquid Glass</div>
             </div>
             ${owner ? `
+            <div class="doi-theme-choice ${theme==='discord'?'active':''}" data-us-theme="discord">
+              <div class="doi-theme-choice-preview discord"></div>
+              <div class="doi-theme-choice-label">Classic (Admin)</div>
+            </div>
             <div class="doi-theme-choice ${theme==='insurgency'?'active':''}" data-us-theme="insurgency">
               <div class="doi-theme-choice-preview insurgency"></div>
-              <div class="doi-theme-choice-label">Insurgency</div>
+              <div class="doi-theme-choice-label">Insurgency (Admin)</div>
             </div>` : ''}
           </div>
-          <div class="doi-us-hint">Midnight is the new default — deep black with translucent liquid-glass panels. Saved to your account.${owner ? ' Insurgency stays owner-only.' : ''}</div>
+          <div class="doi-us-hint">${owner ? 'Classic and Insurgency are admin-only — every user sees Liquid Glass.' : 'Novalis runs on Liquid Glass — deep black with translucent, blurred panels. Your accent color below personalizes it.'}</div>
         </div>
         <div class="doi-us-field">
           <label>Accent Color</label>
@@ -1843,9 +1931,11 @@
     const modal = $('#doiServerSettings');
     $('#doiSSTitle').textContent = '▸ ' + s.name;
     const isOwner = s.isOwner;
-    const membersHtml = (s.members || []).slice(0, 40).map(m =>
-      `<div class="doi-member-row">${avatarHTML(m.name, m.avatar, 28)}
-        <span class="doi-mem-name ${m.isOwner?'doi-officer':''}">${esc(m.name)}${m.isOwner?' · OWNER':''}</span></div>`).join('');
+    const membersHtml = (s.members || []).slice(0, 40).map(m => {
+      const np = nameplateBits(m);
+      return `<div class="doi-member-row ${np.cls}" data-open-profile="${esc(m.key || (m.name||'').toLowerCase())}">${np.html}${avatarHTML(m.name, m.avatar, 28)}
+        <span class="doi-mem-name ${m.isOwner?'doi-officer':''}">${esc(m.name)}${m.isOwner?' · OWNER':''}</span></div>`;
+    }).join('');
     $('#doiSSBody').innerHTML = `
       <div class="doi-field">
         <label>Server ID</label>
@@ -1876,6 +1966,11 @@
       <div class="doi-members-list">${membersHtml}</div>
     `;
     modal.hidden = false;
+    // member rows open the profile popup (like Discord's member list)
+    $$('#doiSSBody [data-open-profile]').forEach(el => el.addEventListener('click', () => {
+      modal.hidden = true;
+      openProfilePopup(el.dataset.openProfile);
+    }));
     // wire owner-only buttons
     $('#doiSSCopyId')?.addEventListener('click', () => {
       navigator.clipboard.writeText(s.id).catch(() => {});

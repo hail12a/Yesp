@@ -550,9 +550,9 @@ async function handleApi(req, res, urlPath, query) {
     if (typeof m.pronouns === "string")      p.pronouns = m.pronouns.slice(0, 20);
     if (typeof m.bannerColor === "string" && /^#[0-9a-fA-F]{3,8}$/.test(m.bannerColor)) p.bannerColor = m.bannerColor;
     if (m.messagePrivacy === "friends" || m.messagePrivacy === "anyone") p.messagePrivacy = m.messagePrivacy;
-    // "midnight" (liquid glass) and classic "discord" are user-selectable; "insurgency" stays owner-only.
-    if (m.theme === "midnight" || m.theme === "discord") p.theme = m.theme;
-    else if (m.theme === "insurgency" && u.name === "DOI") p.theme = m.theme;
+    // Everyone gets Midnight (liquid glass). Classic + Insurgency are owner-only.
+    if (m.theme === "midnight") p.theme = m.theme;
+    else if ((m.theme === "discord" || m.theme === "insurgency") && u.name === "DOI") p.theme = m.theme;
     if (typeof m.accent === "string" && /^#[0-9a-fA-F]{6}$/.test(m.accent)) p.accent = m.accent;
     if (typeof m.accentReset !== "undefined" && m.accentReset) delete p.accent;
     if (typeof m.bubbles === "boolean") p.bubbles = m.bubbles;
