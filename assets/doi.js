@@ -1329,7 +1329,18 @@
     });
   }
 
-  /* ---------- SHOP ---------- */
+  /* ==========================================================================
+     SHOP — Novalis storefront. Discord-shop-style layout, our own build:
+       · Featured view: hero collection banner + horizontal category rails
+       · Browse view: search, sort, "Show only" kind filters, color filters,
+         live result counts
+       · Art-forward cards: every kind renders a real preview — effects play
+         their animation over a mock profile card, frames wrap one, nameplates
+         paint behind mock member rows, decorations ring YOUR avatar
+       · Color variant dots re-tint procedural items live
+       · Tokens economy: balance pill, timed claim, affordability states
+       · Owner tools: add/remove items inline
+     ========================================================================== */
   const SHOP_KINDS = [
     { key: 'premium',    label: 'Premium' },
     { key: 'decoration', label: 'Avatar Decorations' },
@@ -1337,10 +1348,13 @@
     { key: 'effect',     label: 'Profile Effects' },
     { key: 'nameplate',  label: 'Nameplates' },
   ];
-  const orbSVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M16.23 12c0 1.29-.95 2.25-2.22 2.25A2.18 2.18 0 0 1 11.8 12c0-1.29.95-2.25 2.22-2.25 1.27 0 2.22.96 2.22 2.25ZM23 12c0 5.01-4 9-8.99 9a8.93 8.93 0 0 1-8.75-6.9H3.34l-.9-4.2H5.3c.26-.96.68-1.89 1.21-2.7H1.89L1 3h12.74C19.13 3 23 6.99 23 12Z"/></svg>';
+  function kindLabel(k) { return (SHOP_KINDS.find(x => x.key === k) || {}).label || k; }
 
   // Token coin icon (used everywhere a price/balance shows).
   const tokenSVG = '<svg class="doi-token-ico" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor"/><circle cx="12" cy="12" r="7.2" fill="none" stroke="rgba(0,0,0,.28)" stroke-width="1.4"/><path d="M12 7.2v9.6M9.4 9.2h3.6a1.9 1.9 0 0 1 0 3.8H9.8h3.4a1.9 1.9 0 0 1 0 3.8H9.4" fill="none" stroke="rgba(0,0,0,.55)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const heartSVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
+  const searchSVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4" stroke-linecap="round"/></svg>';
+  const bagSVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/></svg>';
 
   function fmtDuration(ms) {
     if (ms <= 0) return 'now';
@@ -1351,201 +1365,427 @@
     return `${Math.max(1, Math.floor(ms / 1000))}s`;
   }
 
-  // Colorful per-category hero gradients (Discord-like banners).
-  const CAT_HERO = {
-    all:        { title: 'THE SHOP',    grad: 'linear-gradient(120deg,#5865f2,#8b5cf6 55%,#c471ed)' },
-    decoration: { title: 'DECORATIONS', grad: 'linear-gradient(120deg,#ff6ba6,#ff9a5a 55%,#ffcf6b)' },
-    frame:      { title: 'FRAMES',      grad: 'linear-gradient(120deg,#7c4dff,#b06bff 55%,#e879f9)' },
-    effect:     { title: 'EFFECTS',     grad: 'linear-gradient(120deg,#0ea5e9,#6366f1 55%,#a855f7)' },
-    nameplate:  { title: 'NAMEPLATES',  grad: 'linear-gradient(120deg,#10b981,#22d3ee 55%,#3b82f6)' },
-    premium:    { title: 'PREMIUM',     grad: 'linear-gradient(120deg,#f59e0b,#ec4899 55%,#8b5cf6)' },
-  };
+  // Color filter buckets — items are colored by their deterministic hue.
+  const SHOP_COLORS = [
+    { key: 'purple', hue: 268 }, { key: 'blue', hue: 225 }, { key: 'teal', hue: 180 },
+    { key: 'green', hue: 120 },  { key: 'yellow', hue: 55 }, { key: 'orange', hue: 30 },
+    { key: 'red', hue: 2 },      { key: 'pink', hue: 322 },
+  ];
+  function hueBucket(h) {
+    if (h < 15 || h >= 345) return 'red';
+    if (h < 45)  return 'orange';
+    if (h < 70)  return 'yellow';
+    if (h < 160) return 'green';
+    if (h < 200) return 'teal';
+    if (h < 250) return 'blue';
+    if (h < 290) return 'purple';
+    return 'pink';
+  }
+
+  // lazily-defaulted shop state (persisted on the shared state object)
+  function shopState() {
+    if (!state.shopView)  state.shopView  = 'featured';   // 'featured' | 'browse'
+    if (!state.shopKinds) state.shopKinds = [];           // [] = all kinds
+    if (!state.shopSort)  state.shopSort  = 'new';        // new | priceAsc | priceDesc | name
+    if (state.shopSearch == null) state.shopSearch = '';
+    if (state.shopColor === undefined) state.shopColor = null;
+    return state;
+  }
 
   // Navigate to the shop as an in-app page (keeps the servers rail + DM list).
   async function openShop(tab) {
+    shopState();
     state.server = 'home';
     state.homeView = 'shop';
-    state.shopTab = tab === 'premium' ? 'premium' : 'all';
-    state.shopCat = tab === 'premium' ? 'premium' : 'all';
+    if (tab === 'premium') {
+      state.shopView = 'browse';
+      state.shopKinds = ['premium'];
+      state.shopTab = 'premium';
+    } else {
+      state.shopView = state.shopView || 'featured';
+      state.shopTab = 'all';
+    }
     rerenderShell();
     try { cache.shop = await api.shop(); rerenderMainSoft(); }
     catch (e) { toast('Shop unavailable'); }
   }
 
-  function shopCard(item, me, isOwner) {
-    const owned = (me.owned || []).includes(item.id);
-    const eqSlot = item.kind;
-    const equipped = me.equipped && me.equipped[eqSlot] === item.id;
-    const canAfford = (me.tokens || 0) >= (item.price || 0);
-    let preview;
-    if (item.kind === 'decoration') {
-      preview = `<div class="doi-shop-deco-ring"${item.image ? ` style="background-image:url('${esc(item.image)}')"` : ''}></div>`;
-    } else if (item.kind === 'nameplate') {
-      preview = `<div class="doi-shop-nameplate-prev"${item.image ? ` style="background-image:url('${esc(item.image)}')"` : ''}>${avatarHTML(me.name, me.avatar, 22)}<span>${esc(me.name || 'Operative')}</span></div>`;
-    } else if (item.kind === 'frame') {
-      preview = `<div class="doi-shop-frame-prev">${item.image ? `<span class="doi-shop-frame-img" style="background-image:url('${esc(item.image)}')"></span>` : ''}<span class="doi-shop-frame-face"></span></div>`;
-    } else if (item.kind === 'effect') {
-      preview = `<div class="doi-shop-effect-prev">${item.image ? `<span class="doi-shop-effect-img" style="background-image:url('${esc(item.image)}')"></span>` : '<span class="doi-bubbles-scoped" aria-hidden="true">' + scopedBubbles(6) + '</span>'}<span class="doi-shop-effect-face">${avatarHTML(me.name, me.avatar, 40)}</span></div>`;
-    } else {
-      preview = item.image ? `<img src="${esc(item.image)}" alt=""/>` : `<div class="doi-shop-noimg">${tokenSVG.replace(/15/g,'46')}</div>`;
+  /* ---------- card art: a real preview per kind ---------- */
+  function shopArtHTML(item, me) {
+    const hue = itemHue(item);
+    const img = item.image ? `<span class="doi-sc-img" style="background-image:url('${esc(item.image)}')"></span>` : '';
+    const myName = (me && me.name) || 'You';
+    const myAva = avatarHTML(myName, me && me.avatar, 36);
+
+    if (item.kind === 'effect') {
+      // the effect playing over a mock profile card
+      return `<div class="doi-sc-art" style="--fx-hue:${hue}">
+        <div class="doi-sc-mock">
+          <span class="doi-sc-mockava">${myAva}</span>
+          <span class="doi-sc-bar" style="width:58%"></span>
+          <span class="doi-sc-bar dim" style="width:40%"></span>
+        </div>
+        ${img || `<span class="doi-fx doi-fx-${fxKind(item)} doi-sc-fxlayer">${fxParticlesHTML(13)}</span>`}
+      </div>`;
     }
-    let action;
-    if (item.kind === 'premium') {
-      action = me.premium
-        ? `<button class="doi-shop-buy owned" disabled>Owned</button>`
-        : `<button class="doi-shop-buy ${canAfford?'':'poor'}" data-buy="${item.id}"${canAfford?'':' disabled'}>${canAfford?'Get Premium':'Need more'}</button>`;
-    } else if (equipped) {
-      action = `<button class="doi-shop-buy equipped" data-unequip="${eqSlot}">Equipped ✓</button>`;
-    } else if (owned) {
-      action = `<button class="doi-shop-buy" data-equip="${item.id}">Equip</button>`;
-    } else {
-      action = `<button class="doi-shop-buy ${canAfford?'':'poor'}" data-buy="${item.id}"${canAfford?'':' disabled'}>${canAfford?'Buy':'Need more'}</button>`;
-    }
-    return `
-      <div class="doi-shop-card ${item.kind}">
-        <div class="doi-shop-preview"><span class="doi-shop-badge">${esc(kindLabel(item.kind))}</span>${preview}
-          ${isOwner ? `<button class="doi-shop-del" data-del="${item.id}" title="Remove item">✕</button>` : ''}</div>
-        <div class="doi-shop-info">
-          <div class="doi-shop-name">${esc(item.name)}</div>
-          <div class="doi-shop-type">${esc(item.desc || '')}</div>
-          <div class="doi-shop-foot">
-            <div class="doi-shop-price">${tokenSVG}${item.price ? item.price : 'Free'}</div>
-            ${action}
-          </div>
+    if (item.kind === 'frame') {
+      // the frame wrapping a mock profile card
+      return `<div class="doi-sc-art" style="--fx-hue:${hue}">
+        <div class="doi-sc-mock doi-sc-mock-framed">
+          <span class="doi-sc-mockava">${myAva}</span>
+          <span class="doi-sc-bar" style="width:54%"></span>
+          <span class="doi-sc-bar dim" style="width:36%"></span>
+          ${img ? `<span class="doi-sc-framelayer-img" style="background-image:url('${esc(item.image)}')"></span>`
+                : `<span class="doi-frame-gen doi-sc-framelayer"></span>`}
         </div>
       </div>`;
+    }
+    if (item.kind === 'decoration') {
+      // the decoration ringing YOUR avatar
+      return `<div class="doi-sc-art doi-sc-art-center" style="--fx-hue:${hue}">
+        <span class="doi-sc-decowrap">${avatarHTML(myName, me && me.avatar, 78)}
+          ${item.image ? `<span class="doi-pp-deco" style="background-image:url('${esc(item.image)}')"></span>`
+                       : `<span class="doi-pp-deco doi-deco-gen"></span>`}
+        </span>
+      </div>`;
+    }
+    if (item.kind === 'nameplate') {
+      // mock member list — the plate paints behind the middle row
+      const plate = nameplateStyle(item);
+      const row = (w, plated) => `<div class="doi-sc-mrow ${plated ? 'plated' : ''}">
+        ${plated ? `<span class="doi-np-plate" style="${plate}"></span>` : ''}
+        <span class="doi-sc-mrowava"></span><span class="doi-sc-bar" style="width:${w}%"></span>
+      </div>`;
+      return `<div class="doi-sc-art doi-sc-art-rows" style="--fx-hue:${hue}">${row(44, false)}${row(60, true)}${row(36, false)}</div>`;
+    }
+    // premium
+    return `<div class="doi-sc-art doi-sc-art-center doi-sc-art-premium" style="--fx-hue:${hue}">
+      <span class="doi-fx doi-fx-stars doi-sc-fxlayer">${fxParticlesHTML(10)}</span>
+      <span class="doi-sc-premglyph">${tokenSVG.replace(/15/g, '56')}</span>
+    </div>`;
   }
-  function kindLabel(k) { return (SHOP_KINDS.find(x => x.key === k) || {}).label || k; }
+
+  function shopActionHTML(item, me) {
+    const owned = (me.owned || []).includes(item.id);
+    const equipped = me.equipped && me.equipped[item.kind] === item.id;
+    const canAfford = (me.tokens || 0) >= (item.price || 0);
+    if (item.kind === 'premium') {
+      return me.premium
+        ? `<button class="doi-shop-buy owned" disabled>Owned</button>`
+        : `<button class="doi-shop-buy ${canAfford ? '' : 'poor'}" data-buy="${item.id}"${canAfford ? '' : ' disabled'}>${canAfford ? 'Get Premium' : 'Need more'}</button>`;
+    }
+    if (equipped) return `<button class="doi-shop-buy equipped" data-unequip="${item.kind}">Equipped ✓</button>`;
+    if (owned)    return `<button class="doi-shop-buy" data-equip="${item.id}">Equip</button>`;
+    return `<button class="doi-shop-buy ${canAfford ? '' : 'poor'}" data-buy="${item.id}"${canAfford ? '' : ' disabled'}>${canAfford ? 'Buy' : 'Need more'}</button>`;
+  }
+
+  function shopCardV2(item, me, isOwner, small) {
+    const hue = itemHue(item);
+    // variant dots re-tint procedural art live (image items have fixed art)
+    const dots = (!item.image && item.kind !== 'premium')
+      ? `<span class="doi-sc-dots">${[0, 45, 300].map((d, i) =>
+          `<button class="doi-sc-dot ${i === 0 ? 'active' : ''}" data-vari="${(hue + d) % 360}"
+             style="background:hsl(${(hue + d) % 360},75%,58%)" title="Color variant"></button>`).join('')}</span>`
+      : '';
+    return `<div class="doi-shop-card v2 ${item.kind} ${small ? 'small' : ''}" data-sku="${item.id}">
+      ${shopArtHTML(item, me)}
+      ${isOwner ? `<button class="doi-shop-del" data-del="${item.id}" title="Remove item">✕</button>` : ''}
+      <div class="doi-sc-meta">
+        <div class="doi-sc-titleline"><span class="doi-shop-name">${esc(item.name)}</span>${dots}</div>
+        ${item.desc && !small ? `<div class="doi-shop-type">${esc(item.desc)}</div>` : ''}
+        <div class="doi-shop-foot">
+          <div class="doi-shop-price">${tokenSVG}${item.price ? item.price : 'Free'}</div>
+          ${shopActionHTML(item, me)}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  /* ---------- filtering / sorting pipeline (browse view) ---------- */
+  function shopVisibleItems(items) {
+    shopState();
+    let list = items.slice();
+    const kinds = state.shopKinds;
+    if (kinds.length) list = list.filter(i => kinds.includes(i.kind));
+    else list = list.filter(i => i.kind !== 'premium'); // premium lives in its banner
+    const q = (state.shopSearch || '').trim().toLowerCase();
+    if (q) list = list.filter(i => (i.name + ' ' + (i.desc || '')).toLowerCase().includes(q));
+    if (state.shopColor) list = list.filter(i => !i.image && hueBucket(itemHue(i)) === state.shopColor);
+    switch (state.shopSort) {
+      case 'priceAsc':  list.sort((a, b) => (a.price || 0) - (b.price || 0)); break;
+      case 'priceDesc': list.sort((a, b) => (b.price || 0) - (a.price || 0)); break;
+      case 'name':      list.sort((a, b) => a.name.localeCompare(b.name)); break;
+      default:          list.reverse(); // recently added first
+    }
+    return list;
+  }
+
+  function shopHeadingText() {
+    const kinds = state.shopKinds || [];
+    if (kinds.length === 1) return kindLabel(kinds[0]);
+    if (kinds.length > 1) return 'Filtered';
+    return 'All Items';
+  }
+
+  /* ---------- page chrome ---------- */
+  function shopPremiumStripHTML(premiumItem, me, isOwner) {
+    if (!premiumItem) return '';
+    return `<div class="doi-shop-nitrostrip">
+      <span class="doi-bubbles-scoped" aria-hidden="true">${scopedBubbles(8)}</span>
+      <div class="doi-shop-nitrostrip-txt">
+        <h3>Novalis Premium</h3>
+        <p>${esc(premiumItem.desc || 'Custom accent, bubble effects, and profile flair — everywhere on Novalis.')}</p>
+      </div>
+      <div class="doi-shop-price">${tokenSVG}${premiumItem.price || 'Free'}</div>
+      ${shopActionHTML(premiumItem, me)}
+      ${isOwner ? `<button class="doi-shop-del static" data-del="${premiumItem.id}" title="Remove">✕</button>` : ''}
+    </div>`;
+  }
+
+  function shopOwnerToolsHTML(open) {
+    return `<details class="doi-shop-manage" ${open ? 'open' : ''}>
+      <summary>⚙ Owner tools — add or remove items</summary>
+      <div class="doi-shop-form">
+        <input id="shopName" placeholder="Item name"/>
+        <select id="shopKind">${SHOP_KINDS.map(k => `<option value="${k.key}">${k.label}</option>`).join('')}</select>
+        <input id="shopPrice" type="number" min="0" step="1" placeholder="Price (tokens)"/>
+        <input id="shopImage" placeholder="Image URL (optional — no image = animated art)"/>
+        <button class="doi-shop-buy" id="shopAdd">Add item</button>
+      </div>
+      <input id="shopDesc" placeholder="Short description (optional)" style="margin-top:8px;width:100%"/>
+      <p class="doi-shop-manage-hint">No image? Novalis generates animated art from the item's name — stars, petals, embers, bubbles, rings, frames and gradient plates. Prices are in tokens; removing an item unequips it for everyone.</p>
+    </details>`;
+  }
+
+  function shopFeaturedHTML(items, me, isOwner) {
+    // hero = the collection with the most items
+    const ranked = SHOP_KINDS.filter(k => k.key !== 'premium')
+      .map(k => ({ k, n: items.filter(i => i.kind === k.key).length }))
+      .sort((a, b) => b.n - a.n);
+    const hero = ranked[0] && ranked[0].n ? ranked[0].k : null;
+    const heroCards = hero ? items.filter(i => i.kind === hero.key).slice(0, 3) : [];
+    const rails = SHOP_KINDS.filter(k => k.key !== 'premium').map(k => {
+      const list = items.filter(i => i.kind === k.key);
+      if (!list.length) return '';
+      return `<section class="doi-shop-rail">
+        <div class="doi-shop-cat-head"><h2>${k.label} <span class="doi-shop-count">(${list.length})</span></h2>
+          <button class="doi-shop-seeall" data-shop-browse="${k.key}">See all →</button></div>
+        <div class="doi-shop-hscroll">${list.map(i => shopCardV2(i, me, isOwner, true)).join('')}</div>
+      </section>`;
+    }).join('');
+    return `
+      ${hero ? `
+      <div class="doi-shop-hero v2">
+        <span class="doi-bubbles-scoped" aria-hidden="true">${scopedBubbles(12)}</span>
+        <div class="doi-shop-hero-inner">
+          <p class="doi-shop-eyebrow">◈ Early Access</p>
+          <h1>${esc(hero.label.toUpperCase())}</h1>
+          <p class="doi-shop-hero-sub">Fresh drops in the ${esc(hero.label.toLowerCase())} collection — earn <b>+${(cache.shop && cache.shop.me && cache.shop.me.claimAmount) || 20}</b> tokens every 18h and make it yours.</p>
+          <button class="doi-shop-collect" data-shop-browse="${hero.key}">Shop the Collection</button>
+        </div>
+        <div class="doi-shop-hero-art">
+          ${heroCards.map((i, idx) => `<div class="doi-shop-herocard hc${idx}" style="--fx-hue:${itemHue(i)}">
+            ${shopArtHTML(i, me)}</div>`).join('')}
+        </div>
+      </div>` : ''}
+      ${rails || '<div class="doi-empty" style="padding:24px 34px;color:var(--doi-ink-4)">No items yet.</div>'}`;
+  }
+
+  function shopBrowseHTML(items, me, isOwner) {
+    shopState();
+    const visible = shopVisibleItems(items);
+    const counts = {};
+    SHOP_KINDS.forEach(k => counts[k.key] = items.filter(i => i.kind === k.key).length);
+    const anyFilter = state.shopKinds.length || state.shopColor || (state.shopSearch || '').trim();
+    const sidebar = `
+      <aside class="doi-shop-side">
+        <div class="doi-shop-side-sec">
+          <h4>Show only</h4>
+          ${SHOP_KINDS.map(k => `
+            <label class="doi-shop-check">
+              <input type="checkbox" data-shop-kind="${k.key}" ${state.shopKinds.includes(k.key) ? 'checked' : ''}/>
+              <span>${k.label}</span><i>${counts[k.key]}</i>
+            </label>`).join('')}
+        </div>
+        <div class="doi-shop-side-sec">
+          <h4>Color</h4>
+          <div class="doi-shop-colorrow">
+            ${SHOP_COLORS.map(c => `<button class="doi-shop-colordot ${state.shopColor === c.key ? 'active' : ''}"
+              data-shop-color="${c.key}" style="background:hsl(${c.hue},72%,55%)" title="${c.key}"></button>`).join('')}
+          </div>
+        </div>
+        ${anyFilter ? `<button class="doi-shop-clear" data-shop-clear>Clear all filters</button>` : ''}
+      </aside>`;
+    return `
+      <div class="doi-shop-browse">
+        <div class="doi-shop-browse-main">
+          <div class="doi-shop-browse-head">
+            <h2>${esc(shopHeadingText())} <span class="doi-shop-count" id="doiShopCount">(${visible.length})</span></h2>
+            <label class="doi-shop-sort">Sort by
+              <select id="doiShopSort">
+                <option value="new" ${state.shopSort === 'new' ? 'selected' : ''}>Recently Added</option>
+                <option value="priceAsc" ${state.shopSort === 'priceAsc' ? 'selected' : ''}>Price: Low to High</option>
+                <option value="priceDesc" ${state.shopSort === 'priceDesc' ? 'selected' : ''}>Price: High to Low</option>
+                <option value="name" ${state.shopSort === 'name' ? 'selected' : ''}>Name: A to Z</option>
+              </select>
+            </label>
+          </div>
+          ${isOwner ? shopOwnerToolsHTML(!items.length) : ''}
+          <div class="doi-shop-grid v2" id="doiShopGrid">
+            ${visible.length ? visible.map(i => shopCardV2(i, me, isOwner)).join('')
+              : `<div class="doi-empty" style="grid-column:1/-1;padding:40px 0;text-align:center;color:var(--doi-ink-4)">Nothing matches — try clearing a filter.</div>`}
+          </div>
+        </div>
+        ${sidebar}
+      </div>`;
+  }
 
   // Build the shop as main-content HTML (head + body). Bound by wireShopPage().
   function renderShopPage() {
+    shopState();
     const r = cache.shop;
     const me = (r && r.me) || cache.profile || { tokens: 0, owned: [], equipped: {} };
     const items = (r && r.items) || [];
     const isOwner = !!(r && r.isOwner);
-    const cat = state.shopCat || 'all';
-    const hero = CAT_HERO[cat] || CAT_HERO.all;
     const premiumItem = items.find(i => i.kind === 'premium');
-
-    const tabs = [{ key: 'all', label: 'All' }].concat(SHOP_KINDS.filter(k => k.key !== 'premium'))
-      .concat(premiumItem ? [{ key: 'premium', label: 'Premium' }] : [])
-      .map(k => `<button class="doi-shop-tab ${cat === k.key ? 'active' : ''}" data-shop-cat="${k.key}">${esc(k.label)}</button>`).join('');
-
-    // Which items to show for the active category.
-    let visible = cat === 'all' ? items.filter(i => i.kind !== 'premium')
-                : items.filter(i => i.kind === cat);
-
-    let bodyGrids;
-    if (cat === 'all') {
-      bodyGrids = SHOP_KINDS.filter(k => k.key !== 'premium').map(k => {
-        const list = items.filter(i => i.kind === k.key);
-        if (!list.length) return '';
-        return `<section class="doi-shop-cat">
-          <div class="doi-shop-cat-head"><h2>${k.label}</h2><button class="doi-shop-seeall" data-shop-cat="${k.key}">See all →</button></div>
-          <div class="doi-shop-grid">${list.map(i => shopCard(i, me, isOwner)).join('')}</div></section>`;
-      }).join('');
-    } else if (cat === 'premium') {
-      bodyGrids = premiumItem
-        ? `<div class="doi-shop-grid">${shopCard(premiumItem, me, isOwner)}</div>`
-        : '<div class="doi-empty" style="padding:24px 0;color:var(--doi-ink-4)">Premium isn\'t listed right now.</div>';
-    } else {
-      bodyGrids = visible.length
-        ? `<div class="doi-shop-grid">${visible.map(i => shopCard(i, me, isOwner)).join('')}</div>`
-        : '<div class="doi-empty" style="padding:24px 0;color:var(--doi-ink-4)">Nothing here yet.</div>';
-    }
-
     const claimReady = (me.claimIn || 0) <= 0;
-    const claimBtn = `<button class="doi-shop-claim ${claimReady ? 'ready' : ''}" data-shop-claim ${claimReady ? '' : 'disabled'}>
-        ${claimReady ? `Claim +${me.claimAmount || 20}` : `Claim in ${fmtDuration(me.claimIn || 0)}`}
-      </button>`;
 
     const head = `
-      <span class="doi-hash"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/></svg></span>
+      <span class="doi-hash">${bagSVG}</span>
       <h2>Shop</h2>
       <div class="doi-shop-head-right">
         <div class="doi-token-pill" title="Your token balance">${tokenSVG}<b>${me.tokens != null ? me.tokens : 0}</b><span>Tokens</span></div>
-        ${claimBtn}
+        <button class="doi-shop-claim ${claimReady ? 'ready' : ''}" data-shop-claim ${claimReady ? '' : 'disabled'}>
+          ${claimReady ? `Claim +${me.claimAmount || 20}` : `Claim in ${fmtDuration(me.claimIn || 0)}`}
+        </button>
       </div>`;
 
     const body = `<div class="doi-main-body doi-shop-scroll">
-      <div class="doi-shop">
-        <div class="doi-shop-tabs">${tabs}</div>
-        <div class="doi-shop-hero" style="background:${hero.grad}">
-          <span class="doi-bubbles-scoped" aria-hidden="true">${scopedBubbles(14)}</span>
-          <div class="doi-shop-hero-inner">
-            <p class="doi-shop-eyebrow">Novalis Shop</p>
-            <h1>${hero.title}</h1>
-            <p class="doi-shop-hero-sub">Spend tokens on decorations, frames, effects &amp; nameplates. Earn <b>+${me.claimAmount || 20}</b> tokens every 18h — claim above.</p>
-          </div>
+      <div class="doi-shop v2">
+        <div class="doi-shop-topstrip">
+          <button class="doi-shop-tab ${state.shopView === 'featured' ? 'active' : ''}" data-shop-view="featured">Featured</button>
+          <button class="doi-shop-tab ${state.shopView === 'browse' ? 'active' : ''}" data-shop-view="browse">Browse</button>
+          <span class="doi-shop-topstrip-spacer"></span>
+          <label class="doi-shop-search">${searchSVG}<input id="doiShopSearch" placeholder="Search the Shop" value="${esc(state.shopSearch || '')}"/></label>
+          <span class="doi-shop-fav" title="Wishlist — coming soon">${heartSVG}</span>
         </div>
-        ${isOwner ? `
-          <details class="doi-shop-manage" ${items.length ? '' : 'open'}>
-            <summary>⚙ Owner tools — add or remove items</summary>
-            <div class="doi-shop-form">
-              <input id="shopName" placeholder="Item name"/>
-              <select id="shopKind">${SHOP_KINDS.map(k => `<option value="${k.key}">${k.label}</option>`).join('')}</select>
-              <input id="shopPrice" type="number" min="0" step="1" placeholder="Price (tokens)"/>
-              <input id="shopImage" placeholder="Image URL (png/webp)"/>
-              <button class="doi-shop-buy" id="shopAdd">Add item</button>
-            </div>
-            <input id="shopDesc" placeholder="Short description (optional)" style="margin-top:8px;width:100%"/>
-            <p class="doi-shop-manage-hint">Removing an item also unequips it for everyone. Prices are in tokens.</p>
-          </details>` : ''}
-        ${bodyGrids || '<div class="doi-empty" style="padding:24px 0;color:var(--doi-ink-4)">No items yet.</div>'}
+        ${shopPremiumStripHTML(premiumItem, me, isOwner)}
+        ${state.shopView === 'browse' ? shopBrowseHTML(items, me, isOwner) : shopFeaturedHTML(items, me, isOwner)}
       </div>
     </div>`;
     return `<div class="doi-main-head">${head}</div>${body}`;
   }
 
-  function wireShopPage(container) {
-    const modal = container; // events are scoped to the main content
+  /* ---------- wiring ---------- */
+  function wireShopCards(scope) {
     async function refresh(prof) {
       if (prof) cache.profile = prof;
       try { cache.shop = await api.shop(); } catch (_) {}
       rerenderMainSoft(); applyTheme(); mountBubbles();
     }
-    $$('[data-shop-cat]', modal).forEach(b => b.addEventListener('click', () => {
-      state.shopCat = b.dataset.shopCat;
-      state.shopTab = b.dataset.shopCat === 'premium' ? 'premium' : 'all';
-      rerenderShell();
-    }));
-    $$('[data-shop-claim]', modal).forEach(b => b.addEventListener('click', async () => {
-      b.disabled = true;
-      try { const rr = await api.shopClaim(); toast(`+${rr.gained} tokens claimed`); await refresh(rr.profile); }
-      catch (e) { toast(e.message === 'Not ready yet' ? 'Not ready yet — check back later' : e.message); b.disabled = false; }
-    }));
-    $$('[data-buy]', modal).forEach(b => b.addEventListener('click', async () => {
+    $$('[data-buy]', scope).forEach(b => b.addEventListener('click', async () => {
       const t = b.textContent; b.disabled = true; b.textContent = '…';
       try { const rr = await api.shopBuy(b.dataset.buy); toast('Purchased'); await refresh(rr.profile); }
       catch (e) { toast(e.message === 'Not enough tokens' ? 'Not enough tokens' : ('Buy failed: ' + e.message)); b.disabled = false; b.textContent = t; }
     }));
-    $$('[data-equip]', modal).forEach(b => b.addEventListener('click', async () => {
+    $$('[data-equip]', scope).forEach(b => b.addEventListener('click', async () => {
       try { const rr = await api.shopEquip({ id: b.dataset.equip }); toast('Equipped'); await refresh(rr.profile); }
       catch (e) { toast(e.message); }
     }));
-    $$('[data-unequip]', modal).forEach(b => b.addEventListener('click', async () => {
+    $$('[data-unequip]', scope).forEach(b => b.addEventListener('click', async () => {
       try { const rr = await api.shopEquip({ unequip: true, slot: b.dataset.unequip }); toast('Unequipped'); await refresh(rr.profile); }
       catch (e) { toast(e.message); }
     }));
-    $$('[data-del]', modal).forEach(b => b.addEventListener('click', async () => {
+    $$('[data-del]', scope).forEach(b => b.addEventListener('click', async () => {
       if (!confirm('Remove this item from the shop?')) return;
       try { await api.shopAdmin({ action: 'remove', id: b.dataset.del }); toast('Removed'); await refresh(); }
       catch (e) { toast(e.message); }
     }));
-    const addBtn = modal.querySelector('#shopAdd');
+    // variant dots re-tint the card's procedural art live
+    $$('.doi-sc-dot', scope).forEach(d => d.addEventListener('click', () => {
+      const card = d.closest('.doi-shop-card');
+      if (!card) return;
+      const art = card.querySelector('.doi-sc-art');
+      if (art) art.style.setProperty('--fx-hue', d.dataset.vari);
+      card.querySelectorAll('.doi-sc-dot').forEach(x => x.classList.toggle('active', x === d));
+    }));
+  }
+
+  function wireShopPage(container) {
+    shopState();
+    async function refresh(prof) {
+      if (prof) cache.profile = prof;
+      try { cache.shop = await api.shop(); } catch (_) {}
+      rerenderMainSoft(); applyTheme(); mountBubbles();
+    }
+    // featured/browse switch + "See all" / "Shop the Collection"
+    $$('[data-shop-view]', container).forEach(b => b.addEventListener('click', () => {
+      state.shopView = b.dataset.shopView;
+      rerenderMainSoft();
+    }));
+    $$('[data-shop-browse]', container).forEach(b => b.addEventListener('click', () => {
+      state.shopView = 'browse';
+      state.shopKinds = [b.dataset.shopBrowse];
+      rerenderMainSoft();
+    }));
+    // claim
+    $$('[data-shop-claim]', container).forEach(b => b.addEventListener('click', async () => {
+      b.disabled = true;
+      try { const rr = await api.shopClaim(); toast(`+${rr.gained} tokens claimed`); await refresh(rr.profile); }
+      catch (e) { toast(e.message === 'Not ready yet' ? 'Not ready yet — check back later' : e.message); b.disabled = false; }
+    }));
+    // search — grid-only refresh so the input keeps focus
+    const search = container.querySelector('#doiShopSearch');
+    if (search) search.addEventListener('input', () => {
+      state.shopSearch = search.value;
+      if (state.shopView !== 'browse') { state.shopView = 'browse'; rerenderMainSoft(); requestAnimationFrame(() => { const s = document.getElementById('doiShopSearch'); if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }); return; }
+      const grid = container.querySelector('#doiShopGrid');
+      const count = container.querySelector('#doiShopCount');
+      if (!grid) return;
+      const r = cache.shop || {};
+      const visible = shopVisibleItems(r.items || []);
+      grid.innerHTML = visible.length
+        ? visible.map(i => shopCardV2(i, r.me || {}, !!r.isOwner)).join('')
+        : `<div class="doi-empty" style="grid-column:1/-1;padding:40px 0;text-align:center;color:var(--doi-ink-4)">Nothing matches — try clearing a filter.</div>`;
+      if (count) count.textContent = `(${visible.length})`;
+      wireShopCards(grid);
+    });
+    // sort
+    const sort = container.querySelector('#doiShopSort');
+    if (sort) sort.addEventListener('change', () => { state.shopSort = sort.value; rerenderMainSoft(); });
+    // kind checkboxes
+    $$('[data-shop-kind]', container).forEach(cb => cb.addEventListener('change', () => {
+      const k = cb.dataset.shopKind;
+      const set = new Set(state.shopKinds);
+      if (cb.checked) set.add(k); else set.delete(k);
+      state.shopKinds = [...set];
+      rerenderMainSoft();
+    }));
+    // color filters
+    $$('[data-shop-color]', container).forEach(b => b.addEventListener('click', () => {
+      state.shopColor = state.shopColor === b.dataset.shopColor ? null : b.dataset.shopColor;
+      rerenderMainSoft();
+    }));
+    $$('[data-shop-clear]', container).forEach(b => b.addEventListener('click', () => {
+      state.shopKinds = []; state.shopColor = null; state.shopSearch = '';
+      rerenderMainSoft();
+    }));
+    // owner add
+    const addBtn = container.querySelector('#shopAdd');
     if (addBtn) addBtn.addEventListener('click', async () => {
-      const name = modal.querySelector('#shopName').value.trim();
+      const name = container.querySelector('#shopName').value.trim();
       if (!name) return toast('Name required');
       const patch = {
         action: 'add', name,
-        kind: modal.querySelector('#shopKind').value,
-        price: parseInt(modal.querySelector('#shopPrice').value, 10) || 0,
-        image: modal.querySelector('#shopImage').value.trim(),
-        desc: modal.querySelector('#shopDesc').value.trim(),
+        kind: container.querySelector('#shopKind').value,
+        price: parseInt(container.querySelector('#shopPrice').value, 10) || 0,
+        image: container.querySelector('#shopImage').value.trim(),
+        desc: container.querySelector('#shopDesc').value.trim(),
       };
       try { await api.shopAdmin(patch); toast('Item added'); await refresh(); }
       catch (e) { toast(e.message); }
     });
+    wireShopCards(container);
   }
 
   /* ---------- iOS26 BUBBLES ---------- */

@@ -213,6 +213,10 @@ if (!doiStore.shop) {
     { id: "sku-fallstars", kind: "effect",     name: "Falling Stars",   price: 150, image: "", desc: "Comets and stardust streak behind you." },
     { id: "sku-nevermore", kind: "effect",     name: "Nevermore",       price: 180, image: "", desc: "Ravens drift through a midnight haze." },
     { id: "sku-hellokit",  kind: "effect",     name: "Hello Kitty",     price: 200, image: "", desc: "Cherry-blossom charm across your card." },
+    { id: "sku-trapsouls", kind: "effect",     name: "Trapped Souls",   price: 180, image: "", desc: "Ghostly embers claw up from the deep." },
+    { id: "sku-waterstal", kind: "effect",     name: "Water Stalker",   price: 150, image: "", desc: "Cold droplets rise through the dark." },
+    { id: "sku-galaxy",    kind: "effect",     name: "Galaxy Night",    price: 170, image: "", desc: "A slow drift of starlight and dust." },
+    { id: "sku-heartbloom",kind: "effect",     name: "Heart Bloom",     price: 160, image: "", desc: "Petals of neon hearts flutter down." },
     // Nameplates (120 tokens each)
     { id: "sku-dreamhop",  kind: "nameplate",  name: "Dream Hop",       price: 120, image: "", desc: "A winged bunny hops behind your name." },
     { id: "sku-starstruck",kind: "nameplate",  name: "Star Struck",     price: 120, image: "", desc: "A moonlit night behind your name." },
