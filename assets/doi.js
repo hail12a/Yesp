@@ -176,9 +176,13 @@
   }
 
   function applyTheme() {
-    // Non-owners are always Discord-dark. Owner can pick Insurgency.
-    const wantIns = isDOI() && cache.profile && cache.profile.theme === 'insurgency';
+    // Midnight (liquid glass) is the default for everyone. Users can switch to
+    // classic Discord-dark; only the owner can pick Insurgency.
+    const themeName = (cache.profile && cache.profile.theme) || 'midnight';
+    const wantIns = isDOI() && themeName === 'insurgency';
+    const wantMid = !wantIns && themeName !== 'discord';
     document.body.classList.toggle('doi-theme-insurgency', !!wantIns);
+    document.body.classList.toggle('doi-theme-midnight', !!wantMid);
     if (typeof window.__doiMountBubbles === 'function') window.__doiMountBubbles();
     const root = document.documentElement;
     if (wantIns) {
@@ -1673,31 +1677,28 @@
         </div>`;
     } else if (section === 'appearance') {
       const owner = !!p.isDOI;
-      const theme = p.theme || 'discord';
+      const theme = p.theme || 'midnight';
       body = `
         <h2>Appearance</h2>
-        ${owner ? `
-          <div class="doi-us-field">
-            <label>Theme (Owner Only)</label>
-            <div class="doi-theme-picker">
-              <div class="doi-theme-choice ${theme==='discord'?'active':''}" data-us-theme="discord">
-                <div class="doi-theme-choice-preview discord"></div>
-                <div class="doi-theme-choice-label">Discord</div>
-              </div>
-              <div class="doi-theme-choice ${theme==='insurgency'?'active':''}" data-us-theme="insurgency">
-                <div class="doi-theme-choice-preview insurgency"></div>
-                <div class="doi-theme-choice-label">Insurgency</div>
-              </div>
+        <div class="doi-us-field">
+          <label>Theme</label>
+          <div class="doi-theme-picker">
+            <div class="doi-theme-choice ${theme==='midnight'?'active':''}" data-us-theme="midnight">
+              <div class="doi-theme-choice-preview midnight"></div>
+              <div class="doi-theme-choice-label">Midnight · Liquid Glass</div>
             </div>
-            <div class="doi-us-hint">Users always see the Discord theme. Only the owner can switch to Insurgency.</div>
+            <div class="doi-theme-choice ${theme==='discord'?'active':''}" data-us-theme="discord">
+              <div class="doi-theme-choice-preview discord"></div>
+              <div class="doi-theme-choice-label">Classic Dark</div>
+            </div>
+            ${owner ? `
+            <div class="doi-theme-choice ${theme==='insurgency'?'active':''}" data-us-theme="insurgency">
+              <div class="doi-theme-choice-preview insurgency"></div>
+              <div class="doi-theme-choice-label">Insurgency</div>
+            </div>` : ''}
           </div>
-        ` : `
-          <div class="doi-us-field">
-            <label>Theme</label>
-            <div class="doi-us-val">Discord Dark</div>
-            <div class="doi-us-hint">Alternate themes are owner-only.</div>
-          </div>
-        `}
+          <div class="doi-us-hint">Midnight is the new default — deep black with translucent liquid-glass panels. Saved to your account.${owner ? ' Insurgency stays owner-only.' : ''}</div>
+        </div>
         <div class="doi-us-field">
           <label>Accent Color</label>
           <div class="doi-accent-swatches">
@@ -1754,7 +1755,7 @@
     modal.querySelector('[data-close-modal]').addEventListener('click', () => modal.hidden = true);
     modal.onclick = e => { if (e.target === modal) modal.hidden = true; };
     $$('[data-us-cat]', modal).forEach(b => b.addEventListener('click', () => renderSettings(b.dataset.usCat)));
-    // theme picker (owner only)
+    // theme picker (midnight/discord for everyone; insurgency owner-only, enforced server-side)
     $$('[data-us-theme]', modal).forEach(el => el.addEventListener('click', async () => {
       const t = el.dataset.usTheme;
       try {
@@ -2473,6 +2474,7 @@
 
   /* ---------- BOOT ---------- */
   async function boot() {
+    applyTheme(); // midnight liquid-glass by default, even on the login gate
     if (!cache.token) { renderGate('login'); return; }
     try {
       const r = await api.me();

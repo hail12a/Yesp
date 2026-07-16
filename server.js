@@ -256,7 +256,7 @@ function doiProfile(key) {
     avatar: p.avatar || null,
     bannerColor: p.bannerColor || defaultBanner(key),
     messagePrivacy: p.messagePrivacy || "anyone",   // "anyone" | "friends"
-    theme: p.theme || "discord",                    // "discord" | "insurgency" (owner-only meaningful)
+    theme: p.theme || "midnight",                   // "midnight" (liquid glass, default) | "discord" | "insurgency" (owner-only)
     accent: p.accent || doiStore.siteAccent || "#5865f2",  // per-user accent; falls back to owner-set site default
     siteAccent: doiStore.siteAccent || "",          // owner-pushed default (for the Appearance toggle state)
     bubbles: p.bubbles !== false,                   // iOS26 bubble effects on by default
@@ -550,7 +550,9 @@ async function handleApi(req, res, urlPath, query) {
     if (typeof m.pronouns === "string")      p.pronouns = m.pronouns.slice(0, 20);
     if (typeof m.bannerColor === "string" && /^#[0-9a-fA-F]{3,8}$/.test(m.bannerColor)) p.bannerColor = m.bannerColor;
     if (m.messagePrivacy === "friends" || m.messagePrivacy === "anyone") p.messagePrivacy = m.messagePrivacy;
-    if ((m.theme === "discord" || m.theme === "insurgency") && u.name === "DOI") p.theme = m.theme;
+    // "midnight" (liquid glass) and classic "discord" are user-selectable; "insurgency" stays owner-only.
+    if (m.theme === "midnight" || m.theme === "discord") p.theme = m.theme;
+    else if (m.theme === "insurgency" && u.name === "DOI") p.theme = m.theme;
     if (typeof m.accent === "string" && /^#[0-9a-fA-F]{6}$/.test(m.accent)) p.accent = m.accent;
     if (typeof m.accentReset !== "undefined" && m.accentReset) delete p.accent;
     if (typeof m.bubbles === "boolean") p.bubbles = m.bubbles;

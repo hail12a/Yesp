@@ -1287,3 +1287,247 @@ body.doi-no-bubbles .doi-bubbles { display: none; }
 }
 body.doi-no-bubbles .doi-bubbles-scoped { display: none; }
 /* (shop hero + per-kind preview styles live in the SHOP page section above) */
+
+/* =========================================================
+   MIDNIGHT — iOS26 Liquid Glass theme (the NEW DEFAULT).
+   Activated by body.doi-theme-midnight (set in applyTheme()).
+   Recipe: deep OLED black canvas with accent-tinted ambient
+   glows; the three app columns float as translucent glass
+   cards — backdrop blur + saturation, 1px specular top
+   highlight, soft depth shadow, big smooth radii. Buttons get
+   a liquid sheen that sweeps across on hover.
+   ========================================================= */
+body.doi-theme-midnight {
+  --doi-bg:        #030305;
+  --doi-panel:     #0c0c12;
+  --doi-panel-2:   #08080d;
+  --doi-panel-3:   #15151f;
+  --doi-hover:     rgba(255,255,255,.055);
+  --doi-active:    rgba(255,255,255,.10);
+  --doi-border:    rgba(255,255,255,.065);
+  --doi-radius:    14px;
+  --doi-radius-lg: 22px;
+  --doi-radius-sm: 10px;
+  /* glass tokens */
+  --doi-glass:      rgba(14,14,21,.58);
+  --doi-glass-soft: rgba(20,20,30,.42);
+  --doi-glass-brd:  rgba(255,255,255,.085);
+  --doi-glass-spec: inset 0 1px 0 rgba(255,255,255,.09);
+  --doi-blur:       saturate(170%) blur(26px);
+}
+
+/* ambient canvas the glass refracts — deep black + accent glows */
+body.doi-theme-midnight .doi-shell {
+  gap: 10px; padding: 10px;
+  background:
+    radial-gradient(1100px 640px at 6% -12%, color-mix(in srgb, var(--doi-accent) 17%, transparent), transparent 62%),
+    radial-gradient(900px 620px at 104% 112%, color-mix(in srgb, var(--doi-accent-2) 14%, transparent), transparent 58%),
+    radial-gradient(560px 420px at 55% 48%, rgba(255,255,255,.025), transparent 65%),
+    #020204;
+}
+
+/* the three columns float as liquid-glass cards */
+body.doi-theme-midnight .doi-rail,
+body.doi-theme-midnight .doi-channels,
+body.doi-theme-midnight .doi-main {
+  background: var(--doi-glass);
+  -webkit-backdrop-filter: var(--doi-blur);
+  backdrop-filter: var(--doi-blur);
+  border: 1px solid var(--doi-glass-brd);
+  border-radius: 18px;
+  box-shadow: var(--doi-glass-spec), 0 22px 54px rgba(0,0,0,.55);
+  overflow: hidden;
+}
+body.doi-theme-midnight .doi-rail { border-right: 1px solid var(--doi-glass-brd); }
+body.doi-theme-midnight .doi-channels { box-shadow: var(--doi-glass-spec), 0 22px 54px rgba(0,0,0,.55); }
+
+/* inner surfaces go transparent so the card's glass shows through */
+body.doi-theme-midnight .doi-main-head {
+  background: rgba(255,255,255,.028);
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  box-shadow: none;
+}
+body.doi-theme-midnight .doi-composer { background: transparent; }
+body.doi-theme-midnight .doi-composer form {
+  background: rgba(255,255,255,.055);
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 14px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+  -webkit-backdrop-filter: blur(10px) saturate(150%);
+  backdrop-filter: blur(10px) saturate(150%);
+}
+body.doi-theme-midnight .doi-composer form:focus-within {
+  border-color: color-mix(in srgb, var(--doi-accent) 65%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 3px color-mix(in srgb, var(--doi-accent) 24%, transparent);
+}
+body.doi-theme-midnight .doi-userpanel {
+  background: rgba(255,255,255,.035);
+  border-top: 1px solid rgba(255,255,255,.06);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  backdrop-filter: blur(12px) saturate(150%);
+}
+body.doi-theme-midnight .doi-guildhead { border-bottom: 1px solid rgba(255,255,255,.06); box-shadow: none; }
+
+/* smooth rounded rows everywhere */
+body.doi-theme-midnight :is(.doi-ch, .doi-dm-row, .doi-home-nav) { border-radius: 10px; }
+body.doi-theme-midnight .doi-rail-item { background: rgba(255,255,255,.06); }
+body.doi-theme-midnight .doi-rail-item:hover, body.doi-theme-midnight .doi-rail-item.active { background: var(--doi-accent); }
+body.doi-theme-midnight .doi-rail-add { background: rgba(255,255,255,.06); }
+body.doi-theme-midnight .doi-rail-sep { background: rgba(255,255,255,.08); }
+
+/* liquid buttons — translucent accent, specular top edge, sheen sweep on hover */
+body.doi-theme-midnight :is(.doi-shop-buy:not(.owned):not(.poor):not(.equipped),
+  .doi-composer button, .doi-gate-submit, .doi-btn-primary, .doi-pp-btn.doi-btn-primary) {
+  background:
+    linear-gradient(115deg, rgba(255,255,255,.25), rgba(255,255,255,0) 42%) no-repeat -120% 0 / 240% 100%,
+    color-mix(in srgb, var(--doi-accent) 82%, rgba(8,8,14,.5));
+  border: 1px solid rgba(255,255,255,.17);
+  border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.30), inset 0 -10px 18px rgba(0,0,0,.16),
+              0 10px 26px color-mix(in srgb, var(--doi-accent) 30%, transparent);
+  -webkit-backdrop-filter: blur(8px) saturate(160%);
+  backdrop-filter: blur(8px) saturate(160%);
+  transition: transform .18s var(--doi-ease-out), box-shadow .2s var(--doi-ease-out),
+              background-position .55s var(--doi-ease-out), filter .18s ease;
+}
+body.doi-theme-midnight :is(.doi-shop-buy:not(.owned):not(.poor):not(.equipped),
+  .doi-composer button, .doi-gate-submit, .doi-btn-primary, .doi-pp-btn.doi-btn-primary):hover {
+  background-position: 130% 0, 0 0;
+  transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.34), inset 0 -10px 18px rgba(0,0,0,.14),
+              0 14px 32px color-mix(in srgb, var(--doi-accent) 42%, transparent);
+}
+body.doi-theme-midnight :is(.doi-shop-buy, .doi-composer button, .doi-gate-submit, .doi-btn-primary,
+  .doi-pp-btn.doi-btn-primary):active { transform: translateY(0) scale(.985); }
+body.doi-theme-midnight .doi-shop-buy:is(.owned,.poor) {
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08);
+  box-shadow: none; color: var(--doi-ink-4); border-radius: 12px;
+}
+body.doi-theme-midnight .doi-shop-buy.equipped {
+  background: color-mix(in srgb, var(--doi-green) 78%, rgba(0,0,0,.35));
+  border: 1px solid rgba(255,255,255,.15); border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.22);
+}
+body.doi-theme-midnight .doi-btn-ghost, body.doi-theme-midnight .doi-pp-btn.doi-btn-cancel,
+body.doi-theme-midnight .doi-btn-cancel {
+  background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10);
+  border-radius: 12px; box-shadow: inset 0 1px 0 rgba(255,255,255,.07);
+}
+
+/* overlays: modals, profile popup, settings — heavier glass */
+body.doi-theme-midnight .doi-modal { background: rgba(0,0,0,.6); backdrop-filter: blur(10px) saturate(130%); }
+body.doi-theme-midnight .doi-modal-inner {
+  background: rgba(16,16,24,.72);
+  border: 1px solid var(--doi-glass-brd);
+  -webkit-backdrop-filter: var(--doi-blur);
+  backdrop-filter: var(--doi-blur);
+  box-shadow: var(--doi-glass-spec), 0 40px 100px rgba(0,0,0,.65);
+}
+body.doi-theme-midnight .doi-pp { background: rgba(16,16,24,.6); }
+body.doi-theme-midnight .doi-pp-namebox { background: rgba(255,255,255,.05); }
+body.doi-theme-midnight .doi-toast {
+  background: rgba(20,20,30,.7); border: 1px solid var(--doi-glass-brd);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(16px) saturate(160%);
+  box-shadow: var(--doi-glass-spec), 0 16px 40px rgba(0,0,0,.5);
+  border-radius: 12px;
+}
+
+/* shop: sticky tab strip + cards go glass */
+body.doi-theme-midnight .doi-shop-tabs {
+  background: rgba(5,5,9,.5);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+body.doi-theme-midnight .doi-shop-tab { border-radius: 10px; }
+body.doi-theme-midnight .doi-shop-card {
+  background: var(--doi-glass-soft);
+  border: 1px solid var(--doi-glass-brd);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  backdrop-filter: blur(14px) saturate(150%);
+  box-shadow: var(--doi-glass-spec), 0 10px 28px rgba(0,0,0,.4);
+}
+body.doi-theme-midnight .doi-shop-card:hover {
+  box-shadow: var(--doi-glass-spec), 0 20px 44px rgba(0,0,0,.55);
+}
+body.doi-theme-midnight .doi-shop-manage {
+  background: var(--doi-glass-soft);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  backdrop-filter: blur(14px) saturate(150%);
+}
+body.doi-theme-midnight .doi-token-pill {
+  -webkit-backdrop-filter: blur(10px) saturate(160%);
+  backdrop-filter: blur(10px) saturate(160%);
+}
+
+/* darker gate + glass topbar */
+body.doi-theme-midnight .doi-gate {
+  background:
+    radial-gradient(1100px 620px at 15% 12%, color-mix(in srgb, var(--doi-accent) 20%, transparent), transparent 60%),
+    radial-gradient(800px 540px at 88% 95%, rgba(140,90,255,.10), transparent 55%),
+    #020204;
+}
+body.doi-theme-midnight .doi-gate-inner { background: rgba(14,14,22,.66); }
+body.doi-home.doi-theme-midnight .topbar {
+  background: rgba(6,6,11,.62);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+
+/* slim glass scrollbars */
+body.doi-theme-midnight *::-webkit-scrollbar { width: 8px; height: 8px; }
+body.doi-theme-midnight *::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,.14) !important; border-radius: 99px;
+  border: 2px solid transparent; background-clip: padding-box;
+}
+body.doi-theme-midnight *::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.24) !important; }
+body.doi-theme-midnight * { scrollbar-color: rgba(255,255,255,.18) transparent; }
+
+/* inputs go glass */
+body.doi-theme-midnight :is(.doi-gate input, .doi-us-field input, .doi-us-field select,
+  .doi-us-field textarea, .doi-home-search input, .doi-shop-manage input, .doi-shop-manage select) {
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.09);
+  border-radius: 11px; box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+}
+body.doi-theme-midnight :is(.doi-gate input, .doi-us-field input, .doi-us-field select,
+  .doi-us-field textarea, .doi-home-search input, .doi-shop-manage input, .doi-shop-manage select):focus {
+  border-color: color-mix(in srgb, var(--doi-accent) 65%, transparent);
+}
+
+/* theme picker swatch for Midnight */
+.doi-theme-choice-preview.midnight {
+  background:
+    radial-gradient(60px 40px at 22% 28%, rgba(88,101,242,.55), transparent 70%),
+    radial-gradient(70px 50px at 82% 82%, rgba(140,90,255,.35), transparent 70%),
+    linear-gradient(135deg, #0a0a12 0%, #14141f 100%);
+  position: relative; overflow: hidden;
+}
+.doi-theme-choice-preview.midnight::after {
+  content: ""; position: absolute; inset: 18% 30% 18% 12%;
+  background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18);
+  border-radius: 8px; backdrop-filter: blur(4px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.25);
+}
+
+/* graceful fallback when backdrop-filter is unsupported */
+@supports not ((backdrop-filter: blur(4px)) or (-webkit-backdrop-filter: blur(4px))) {
+  body.doi-theme-midnight .doi-rail,
+  body.doi-theme-midnight .doi-channels,
+  body.doi-theme-midnight .doi-main,
+  body.doi-theme-midnight .doi-modal-inner,
+  body.doi-theme-midnight .doi-shop-card { background: #0d0d15; }
+}
+
+/* calmer motion for users who ask for it */
+@media (prefers-reduced-motion: reduce) {
+  body.doi-theme-midnight * { animation-duration: .01s !important; transition-duration: .01s !important; }
+}
+
+/* midnight: keep the docs topbar legible on the dark glass bar */
+body.doi-home.doi-theme-midnight .topbar :is(.brand-name, .top-nav a, .icon-btn, .menu-toggle) { color: #e7e8ee; }
+body.doi-home.doi-theme-midnight .topbar .top-nav a:hover { background: rgba(255,255,255,.07); color: #fff; }
+body.doi-home.doi-theme-midnight .topbar .search-trigger {
+  background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.10); color: #b9bcc7;
+}
+body.doi-home.doi-theme-midnight .topbar .search-trigger kbd { background: rgba(255,255,255,.08); color: #b9bcc7; border-color: rgba(255,255,255,.12); }
