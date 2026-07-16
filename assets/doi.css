@@ -1012,6 +1012,74 @@ a.doi-rail-item { text-decoration: none; }
   background: var(--doi-green);
 }
 
+/* ---------- DM / group header action bar ---------- */
+.doi-dm-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+.doi-dm-act {
+  width: 34px; height: 34px; border-radius: 8px;
+  display: grid; place-items: center;
+  background: transparent; border: none; color: var(--doi-ink-3);
+  cursor: pointer; transition: background .12s ease, color .12s ease;
+}
+.doi-dm-act:hover { background: var(--doi-hover); color: #fff; }
+
+/* ---------- group icons (stacked mini-avatars) ---------- */
+.doi-group-icon { background: var(--doi-accent); color: #fff; }
+.doi-group-stack { position: relative; flex-shrink: 0; }
+.doi-group-stack-a, .doi-group-stack-b { position: absolute; }
+.doi-group-stack-a { left: 0; top: 0; z-index: 1; }
+.doi-group-stack-b { right: 0; bottom: 0; z-index: 2; border-radius: 50%; box-shadow: 0 0 0 2px var(--doi-panel); }
+.doi-group-stack .doi-avatar { border: none; }
+
+/* ---------- system messages (group add/remove/leave) ---------- */
+.doi-sysmsg {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 8px; margin: 2px 0;
+  color: var(--doi-ink-4); font-size: 14px;
+}
+.doi-sysmsg-arrow { color: var(--doi-ink-dim); font-size: 16px; }
+.doi-sysmsg-time { color: var(--doi-ink-dim); font-size: 11px; margin-left: 4px; }
+
+/* ---------- soft nav rows (Nitro/Shop) ---------- */
+.doi-home-nav-soft { font-weight: 500; }
+
+/* ---------- composer plus ---------- */
+.doi-composer-plus {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--doi-ink-3); color: var(--doi-panel-3);
+  border: none; cursor: pointer; font-size: 20px; line-height: 1;
+  display: grid; place-items: center; flex-shrink: 0;
+  transition: background .12s ease;
+}
+.doi-composer-plus:hover { background: #fff; }
+
+/* ---------- friend-picker / group modals ---------- */
+.doi-newconvo-sub { color: var(--doi-ink-4); font-size: 12px; margin: -8px 0 12px; }
+.doi-pick-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; margin: 4px 0; }
+.doi-pick-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  transition: background .12s ease;
+}
+.doi-pick-row:hover { background: var(--doi-hover); }
+.doi-pick-row.on { background: rgba(88,101,242,.14); }
+.doi-pick-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--doi-accent); cursor: pointer; }
+.doi-pick-name { flex: 1; color: var(--doi-ink); font-size: 15px; font-weight: 500; }
+.doi-pick-check { color: var(--doi-accent); font-weight: 800; }
+
+/* ---------- toast ---------- */
+.doi-toast {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px);
+  background: rgba(30,31,34,.92); color: var(--doi-ink);
+  border: 1px solid rgba(255,255,255,.08);
+  padding: 12px 20px; border-radius: 12px; z-index: 400;
+  font-size: 14px; font-weight: 500;
+  box-shadow: 0 16px 40px rgba(0,0,0,.45);
+  backdrop-filter: var(--doi-blur);
+  opacity: 0; pointer-events: none;
+  transition: opacity .25s var(--doi-ease), transform .25s var(--doi-ease-out);
+}
+.doi-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
 /* newcat button */
 .doi-newcat-btn {
   margin: 12px 8px 6px; padding: 8px 10px;

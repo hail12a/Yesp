@@ -8,3 +8,4 @@ accounts.json
 worldstate.json
 doi.json
 tilecache/
+node_modules/

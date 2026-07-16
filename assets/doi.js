@@ -13,9 +13,9 @@
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
   const TOKEN_KEY = 'doi.token';
-  const LOGO_URL       = 'assets/img/doi-logo.png?v=20260715h';
-  const HERO_TEAM_URL  = 'assets/img/hero-team.png?v=20260715h';
-  const HERO_GATE_URL  = 'assets/img/hero-gate.png?v=20260715h';
+  const LOGO_URL       = 'assets/img/doi-logo.png?v=20260716a';
+  const HERO_TEAM_URL  = 'assets/img/hero-team.png?v=20260716a';
+  const HERO_GATE_URL  = 'assets/img/hero-gate.png?v=20260716a';
   window.DOI_LOGO_URL = LOGO_URL;
 
   /* ---------- CACHE ---------- */
@@ -28,9 +28,12 @@
     chatSince: {},                     // same key -> ts
     friends: null,                     // list
     friendReqs: { incoming: [], outgoing: [] },
-    dms: null,                         // conversation list
+    dms: null,                         // conversation list (dms + groups)
     dmMessages: {},                    // otherKey -> messages
     dmSince: {},                       // otherKey -> ts
+    groupsFull: {},                    // gid -> full group
+    groupMessages: {},                 // gid -> messages
+    groupSince: {},                    // gid -> ts
     lastServersFetch: 0,
     lastFriendsFetch: 0,
     lastReqsFetch: 0,
@@ -41,9 +44,11 @@
   const state = window.__doiHomeState = window.__doiHomeState || {
     server: 'home',                    // 'home' or serverId
     channel: null,                     // channelId within current server
-    homeView: 'friends',               // 'friends' | 'dm'
+    homeView: 'friends',               // 'friends' | 'dm' | 'group'
     friendTab: 'all',                  // 'online' | 'all' | 'pending' | 'add'
     dmWith: null,                      // userKey when homeView='dm'
+    groupWith: null,                   // groupId when homeView='group'
+    dmSearch: '',                      // filter for "Find or start a conversation"
   };
 
   /* ---------- API ---------- */
@@ -96,6 +101,17 @@
     delChat:   (sid, cid, mid)       => jfetch('/api/doi/servers/' + q(sid) + '/chat/' + q(cid) + '/delete', { method: 'POST', body: JSON.stringify({ token: cache.token, mid }) }),
     editDM:    (otherKey, mid, text) => jfetch('/api/doi/dms/' + q(otherKey) + '/edit',   { method: 'POST', body: JSON.stringify({ token: cache.token, mid, text }) }),
     delDM:     (otherKey, mid)       => jfetch('/api/doi/dms/' + q(otherKey) + '/delete', { method: 'POST', body: JSON.stringify({ token: cache.token, mid }) }),
+
+    createGroup: (name, members) => jfetch('/api/doi/groups', { method: 'POST', body: JSON.stringify({ token: cache.token, name, members }) }),
+    group:       (gid) => jfetch('/api/doi/groups/' + q(gid) + '?token=' + q(cache.token || '')),
+    groupMsgs:   (gid, since) => jfetch('/api/doi/groups/' + q(gid) + '/messages?token=' + q(cache.token || '') + (since ? '&since=' + since : '')),
+    sendGroup:   (gid, text) => jfetch('/api/doi/groups/' + q(gid) + '/messages', { method: 'POST', body: JSON.stringify({ token: cache.token, text }) }),
+    groupInvite: (gid, callsign) => jfetch('/api/doi/groups/' + q(gid) + '/invite',  { method: 'POST', body: JSON.stringify({ token: cache.token, callsign }) }),
+    groupRemove: (gid, callsign) => jfetch('/api/doi/groups/' + q(gid) + '/remove',  { method: 'POST', body: JSON.stringify({ token: cache.token, callsign }) }),
+    groupLeave:  (gid) => jfetch('/api/doi/groups/' + q(gid) + '/leave',   { method: 'POST', body: JSON.stringify({ token: cache.token }) }),
+    groupSettings:(gid, patch) => jfetch('/api/doi/groups/' + q(gid) + '/settings', { method: 'POST', body: JSON.stringify({ token: cache.token, ...patch }) }),
+    editGroupMsg: (gid, mid, text) => jfetch('/api/doi/groups/' + q(gid) + '/messages/edit',   { method: 'POST', body: JSON.stringify({ token: cache.token, mid, text }) }),
+    delGroupMsg:  (gid, mid)       => jfetch('/api/doi/groups/' + q(gid) + '/messages/delete', { method: 'POST', body: JSON.stringify({ token: cache.token, mid }) }),
 
     publicProfile: (userKey) => jfetch('/api/doi/profile/' + q(userKey) + '?token=' + q(cache.token || '')),
   };
@@ -196,7 +212,7 @@
         cache.profile = me.profile;
         applyTheme();
         // fetch initial data before rendering the shell
-        await Promise.all([loadServers(), loadFriends()]);
+        await Promise.all([loadServers(), loadFriends(), loadFriendRequests(), loadDMs()]);
         gate.hidden = true;
         if (typeof window.__doiRender === 'function') window.__doiRender();
         window.dispatchEvent(new CustomEvent('doi:auth'));
@@ -244,8 +260,32 @@
           cache.dmSince[otherKey] = cache.dmMessages[otherKey][cache.dmMessages[otherKey].length - 1].ts;
           rerenderMainSoft();
         }
+      } else if (state.server === 'home' && state.homeView === 'group' && state.groupWith) {
+        const gid = state.groupWith;
+        const since = cache.groupSince[gid] || 0;
+        const r = await api.groupMsgs(gid, since);
+        if (r.messages && r.messages.length) {
+          const prev = cache.groupMessages[gid] || [];
+          cache.groupMessages[gid] = since ? [...prev, ...r.messages] : r.messages;
+          cache.groupSince[gid] = cache.groupMessages[gid][cache.groupMessages[gid].length - 1].ts;
+          rerenderMainSoft();
+        }
+      }
+      // While sitting on Home, refresh the conversation list so new incoming
+      // DMs/groups appear without a manual navigation.
+      if (state.server === 'home') {
+        pollDMListTick();
       }
     } catch (_) { /* ignore transient network */ }
+  }
+  let lastDMListPoll = 0;
+  async function pollDMListTick() {
+    if (Date.now() - lastDMListPoll < 8000) return; // every ~8s
+    lastDMListPoll = Date.now();
+    const before = JSON.stringify((cache.dms || []).map(c => (c.kind === 'group' ? 'g:' + c.id + ':' + c.lastTs : 'd:' + (c.other && c.other.key) + ':' + c.lastTs)));
+    await loadDMs();
+    const after = JSON.stringify((cache.dms || []).map(c => (c.kind === 'group' ? 'g:' + c.id + ':' + c.lastTs : 'd:' + (c.other && c.other.key) + ':' + c.lastTs)));
+    if (before !== after) rerenderSidebarOnly();
   }
 
   /* ---------- LOADERS ---------- */
@@ -296,8 +336,20 @@
     try {
       const r = await api.dm(otherKey);
       cache.dmMessages[otherKey] = r.messages || [];
+      if (r.other) { cache.dmPeers = cache.dmPeers || {}; cache.dmPeers[otherKey] = r.other; }
       if (r.messages && r.messages.length) cache.dmSince[otherKey] = r.messages[r.messages.length - 1].ts;
     } catch (_) { cache.dmMessages[otherKey] = cache.dmMessages[otherKey] || []; }
+  }
+  async function loadGroup(gid) {
+    try {
+      const r = await api.group(gid);
+      if (r.group) {
+        cache.groupsFull[gid] = r.group;
+        cache.groupMessages[gid] = r.group.messages || [];
+        if (cache.groupMessages[gid].length) cache.groupSince[gid] = cache.groupMessages[gid][cache.groupMessages[gid].length - 1].ts;
+      }
+      return cache.groupsFull[gid];
+    } catch (_) { return cache.groupsFull[gid] || null; }
   }
 
   /* Pre-load whatever's needed for the current view. Called once per navigation. */
@@ -309,6 +361,7 @@
       if (!cache.friendReqs || Date.now() - cache.lastReqsFetch    > 30_000) jobs.push(loadFriendRequests());
       if (!cache.dms       || Date.now() - cache.lastDMsFetch     > 30_000) jobs.push(loadDMs());
       if (state.homeView === 'dm' && state.dmWith && !cache.dmMessages[state.dmWith]) jobs.push(loadDMMessages(state.dmWith));
+      if (state.homeView === 'group' && state.groupWith && !cache.groupsFull[state.groupWith]) jobs.push(loadGroup(state.groupWith));
     } else {
       if (!cache.serversFull[state.server]) jobs.push(loadServer(state.server));
       if (state.channel) {
@@ -366,26 +419,38 @@
   function renderSidebar() {
     const p = cache.profile || { name:'…', tag:'#0000', bio:'' };
     if (state.server === 'home') {
-      const dms = cache.dms || [];
+      const all = cache.dms || [];
+      const term = (state.dmSearch || '').trim().toLowerCase();
+      const dms = term
+        ? all.filter(c => convoTitle(c).toLowerCase().includes(term))
+        : all;
       const reqCount = (cache.friendReqs.incoming || []).length;
       return `
         <div class="doi-channels doi-channels-home">
           <div class="doi-home-search">
-            <input placeholder="Find or start a conversation" id="doi-dm-search"/>
+            <input placeholder="Find or start a conversation" id="doi-dm-search" value="${esc(state.dmSearch||'')}"/>
           </div>
           <div class="doi-chan-scroll">
             <div class="doi-home-nav ${state.homeView==='friends'?'active':''}" data-shell-nav="home-friends">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
               <span>Friends</span>
               ${reqCount ? `<span class="doi-badge-count">${reqCount}</span>` : ''}
             </div>
+            <div class="doi-home-nav doi-home-nav-soft" data-shell-soft="Nitro">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.5 7.5H22l-6 4.5 2.5 7.5L12 17l-6.5 4.5L8 14l-6-4.5h7.5z"/></svg>
+              <span>Nitro</span>
+            </div>
+            <div class="doi-home-nav doi-home-nav-soft" data-shell-soft="Shop">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/></svg>
+              <span>Shop</span>
+            </div>
             <div class="doi-catlabel doi-catlabel-dm">
               <span>Direct Messages</span>
-              <button class="doi-catadd" data-shell-newdm title="New DM">+</button>
+              <button class="doi-catadd" data-shell-newdm title="Create DM / Group">+</button>
             </div>
             <div id="doi-dm-list">
-              ${dms.length ? dms.map(dmRow).join('')
-                : '<div class="doi-empty" style="padding:12px 8px;font-size:11px">no conversations yet</div>'}
+              ${dms.length ? dms.map(convoRow).join('')
+                : `<div class="doi-empty" style="padding:12px 8px;font-size:11px">${term ? 'no matches' : 'no conversations yet'}</div>`}
             </div>
           </div>
           ${userPanel(p)}
@@ -431,10 +496,39 @@
       ${canDelete ? `<button class="doi-ch-del" data-del-channel="${esc(c.id)}" title="Delete channel">×</button>` : ''}
     </div>`;
   }
-  function dmRow(c) {
+  function convoTitle(c) {
+    if (c.kind === 'group') return c.name || c.autoName || 'Group';
+    return (c.other && c.other.name) || '';
+  }
+  // Stacked mini-avatars for a group icon (falls back to a group glyph).
+  function groupIconHTML(c, size) {
+    if (c.icon) return `<div class="doi-avatar doi-group-icon" style="width:${size}px;height:${size}px"><img src="${esc(c.icon)}" alt=""/></div>`;
+    const mem = (c.members || []).filter(m => !cache.profile || m.key !== cache.profile.key).slice(0, 2);
+    if (mem.length >= 2) {
+      return `<div class="doi-group-stack" style="width:${size}px;height:${size}px">
+        <div class="doi-group-stack-a">${avatarHTML(mem[0].name, mem[0].avatar, size*0.62)}</div>
+        <div class="doi-group-stack-b">${avatarHTML(mem[1].name, mem[1].avatar, size*0.62)}</div>
+      </div>`;
+    }
+    return `<div class="doi-avatar doi-group-icon" style="width:${size}px;height:${size}px">
+      <svg viewBox="0 0 24 24" width="${size*0.5}" height="${size*0.5}" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>`;
+  }
+  function convoRow(c) {
+    const title = convoTitle(c);
+    if (c.kind === 'group') {
+      const active = state.homeView === 'group' && state.groupWith === c.id;
+      return `<div class="doi-dm-row ${active?'active':''}" data-shell-nav="group" data-gid="${esc(c.id)}" data-title="${esc(title.toLowerCase())}">
+        ${groupIconHTML(c, 32)}
+        <div class="doi-dm-info">
+          <div class="doi-dm-name">${esc(title)}</div>
+          <div class="doi-dm-last">${c.memberCount} Members</div>
+        </div>
+        <button class="doi-dm-close" data-group-leave="${esc(c.id)}" title="Leave group">×</button>
+      </div>`;
+    }
     const other = c.other || {};
     const active = state.homeView === 'dm' && state.dmWith === other.key;
-    return `<div class="doi-dm-row ${active?'active':''}" data-shell-nav="dm" data-dm-key="${esc(other.key)}">
+    return `<div class="doi-dm-row ${active?'active':''}" data-shell-nav="dm" data-dm-key="${esc(other.key)}" data-title="${esc((other.name||'').toLowerCase())}">
       ${avatarHTML(other.name, other.avatar, 32)}
       <div class="doi-dm-info">
         <div class="doi-dm-name">${esc(other.name)}</div>
@@ -506,7 +600,17 @@
 
   function renderMainHome() {
     if (state.homeView === 'dm' && state.dmWith) return renderMainDM();
+    if (state.homeView === 'group' && state.groupWith) return renderMainGroup();
     return renderMainFriends();
+  }
+
+  function dmHeaderActions(extra) {
+    return `<div class="doi-dm-actions">
+      ${extra || ''}
+      <button class="doi-dm-act" title="Start Voice Call" data-shell-soft="Voice calls"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg></button>
+      <button class="doi-dm-act" title="Start Video Call" data-shell-soft="Video calls"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></button>
+      <button class="doi-dm-act" title="Pinned Messages" data-shell-soft="Pinned messages"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17v5M9 10.76V3h6v7.76a2 2 0 0 0 .55 1.38l1.9 2A1 1 0 0 1 16.72 16H7.28a1 1 0 0 1-.73-1.86l1.9-2A2 2 0 0 0 9 10.76z"/></svg></button>
+    </div>`;
   }
 
   function renderMainFriends() {
@@ -592,11 +696,35 @@
     const other = otherProf ? otherProf.other : { key: otherKey, name: otherKey, avatar: null, bio: '' };
     const msgs = cache.dmMessages[otherKey] || [];
     const head = `${avatarHTML(other.name, other.avatar, 24)}<h2 style="margin-left:8px">${esc(other.name)}</h2>
-      <button class="doi-topic doi-topic-btn" data-open-profile="${esc(otherKey)}">view profile</button>`;
+      ${dmHeaderActions(`<button class="doi-dm-act" title="Add Friends to DM" data-shell-newdm><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></svg></button>`)}`;
     const body = `<div class="doi-main-body" id="doi-msgs">
       ${renderMessages(msgs, dmWelcomeHTML(other))}
     </div>${composerHTML(other.name, true)}`;
     return `<div class="doi-main-head doi-main-head-dm">${head}</div>${body}`;
+  }
+
+  function renderMainGroup() {
+    const gid = state.groupWith;
+    const g = cache.groupsFull[gid] || (cache.dms || []).find(c => c.kind === 'group' && c.id === gid);
+    if (!g) return `<div class="doi-main-head"><h2>Loading…</h2></div><div class="doi-main-body"><div class="doi-empty">fetching group…</div></div>`;
+    const title = g.name || g.autoName || 'Group';
+    const msgs = cache.groupMessages[gid] || g.messages || [];
+    const head = `${groupIconHTML(g, 24)}<h2 style="margin-left:8px">${esc(title)}</h2>
+      <span class="doi-topic">${g.memberCount || (g.members||[]).length} members</span>
+      ${dmHeaderActions(`<button class="doi-dm-act" title="Add People" data-group-invite="${esc(gid)}"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></svg></button>
+        <button class="doi-dm-act" title="Group Settings" data-group-settings="${esc(gid)}"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>`)}`;
+    const body = `<div class="doi-main-body" id="doi-msgs">
+      ${renderMessages(msgs, groupWelcomeHTML(g))}
+    </div>${composerHTML(title, false, gid)}`;
+    return `<div class="doi-main-head doi-main-head-dm">${head}</div>${body}`;
+  }
+  function groupWelcomeHTML(g) {
+    const title = g.name || g.autoName || 'Group';
+    return `<div class="doi-chat-welcome">
+      ${groupIconHTML(g, 80)}
+      <h1>${esc(title)}</h1>
+      <p>Welcome to the beginning of the <b>${esc(title)}</b> group.</p>
+    </div>`;
   }
 
   function msgActions(mine) {
@@ -627,6 +755,13 @@
     let html = welcomeHTML || '';
     let prev = null;
     for (const raw of rawList) {
+      // system messages (group add/remove/leave) render as centered notices
+      if (raw.system) {
+        if (!prev || !sameDay(prev.ts, raw.ts)) html += `<div class="doi-date-divider"><span>${esc(fmtDivider(raw.ts))}</span></div>`;
+        html += `<div class="doi-sysmsg"><span class="doi-sysmsg-arrow">←</span> ${esc(raw.text)} <span class="doi-sysmsg-time">${esc(clock(raw.ts))}</span></div>`;
+        prev = { ts: raw.ts, name: 'system' };
+        continue;
+      }
       const m = normMsg(raw);
       const mine = (m.key && m.key === me.key) || m.name === me.name;
       const isOfficer = m.name === 'DOI';
@@ -678,10 +813,13 @@
       <p>${esc(ch.topic || 'This is the start of the #' + ch.name + ' channel.')}</p>
     </div>`;
   }
-  function composerHTML(label, isDM) {
-    const placeholder = isDM ? 'Message @' + esc(label || '') : 'Message #' + esc(label || 'channel');
+  function composerHTML(label, isDM, groupId) {
+    const placeholder = groupId ? 'Message ' + esc(label || 'group')
+      : isDM ? 'Message @' + esc(label || '')
+      : 'Message #' + esc(label || 'channel');
     return `<div class="doi-composer">
-      <form data-composer data-dm="${isDM ? '1':''}">
+      <form data-composer data-dm="${isDM ? '1':''}" data-gid="${groupId ? esc(groupId) : ''}">
+        <button type="button" class="doi-composer-plus" data-shell-soft="Attachments" title="Upload">+</button>
         <input type="text" placeholder="${placeholder}" maxlength="2000" autocomplete="off"/>
         <button type="submit">Send ▸</button>
       </form>
@@ -761,6 +899,8 @@
 
       <div class="doi-mini-anchor" id="doiMiniAnchor" hidden></div>
 
+      <div class="doi-modal" id="doiNewConvoModal" hidden><div class="doi-modal-inner"></div></div>
+
       <div class="doi-modal doi-modal-full" id="doiUserSettings" hidden></div>`;
   }
 
@@ -769,9 +909,45 @@
     state.server = 'home';
     state.homeView = 'dm';
     state.dmWith = otherKey;
+    state.groupWith = null;
     await Promise.all([loadDMs(), loadDMMessages(otherKey)]);
+    // optimistic: if this convo isn't in the list yet (brand-new, non-friend),
+    // splice in a placeholder row so it shows immediately (Discord parity).
+    ensureConvoInList('dm', otherKey);
     rerenderShell();
     startPoll();
+  }
+  async function openGroup(gid) {
+    if (!gid) return;
+    state.server = 'home';
+    state.homeView = 'group';
+    state.groupWith = gid;
+    state.dmWith = null;
+    await Promise.all([loadDMs(), loadGroup(gid)]);
+    rerenderShell();
+    startPoll();
+  }
+  // Make sure a just-opened conversation appears in cache.dms right away.
+  function ensureConvoInList(kind, key) {
+    cache.dms = cache.dms || [];
+    if (kind === 'dm') {
+      if (cache.dms.some(c => c.kind !== 'group' && c.other && c.other.key === key)) return;
+      const peer = (cache.dmPeers && cache.dmPeers[key]) || { key, name: key, avatar: null };
+      cache.dms.unshift({ kind: 'dm', other: peer, lastTs: Date.now(), lastText: '' });
+    }
+  }
+  // Update a conversation's last-message preview + move it to the top.
+  function bumpConvo(kind, key, text, ts) {
+    if (!cache.dms) return;
+    let row;
+    if (kind === 'group') row = cache.dms.find(c => c.kind === 'group' && c.id === key);
+    else row = cache.dms.find(c => c.kind !== 'group' && c.other && c.other.key === key);
+    if (!row) return;
+    row.lastTs = ts || Date.now();
+    row.lastText = kind === 'group'
+      ? ((cache.profile ? cache.profile.name + ': ' : '') + text)
+      : text;
+    cache.dms.sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0));
   }
 
   async function openProfilePopup(userKey) {
@@ -893,6 +1069,149 @@
       catch (er) { alert(er.message); }
     });
     inner.querySelector('[data-shell-opensettings]')?.addEventListener('click', () => { modal.hidden = true; openSettings(); });
+  }
+
+  /* ---------- TOAST ---------- */
+  let toastTimer = null;
+  function toast(msg) {
+    let el = document.getElementById('doiToast');
+    if (!el) { el = document.createElement('div'); el.id = 'doiToast'; el.className = 'doi-toast'; document.body.appendChild(el); }
+    el.textContent = msg;
+    el.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+  }
+
+  /* ---------- NEW CONVERSATION (DM or group) ---------- */
+  function openNewConvo() {
+    const modal = document.getElementById('doiNewConvoModal');
+    if (!modal) return;
+    const friends = cache.friends || [];
+    const picked = new Set();
+    const body = modal.querySelector('.doi-modal-inner');
+    function render() {
+      const rows = friends.length ? friends.map(f => {
+        const on = picked.has(f.key);
+        return `<label class="doi-pick-row ${on?'on':''}">
+          <input type="checkbox" data-pick="${esc(f.key)}" ${on?'checked':''}/>
+          ${avatarHTML(f.name, f.avatar, 32)}
+          <span class="doi-pick-name">${esc(f.name)}</span>
+          <span class="doi-pick-check">${on?'✓':''}</span>
+        </label>`;
+      }).join('') : `<div class="doi-empty" style="padding:20px">Add friends first — then start a DM or group.</div>`;
+      const n = picked.size;
+      body.innerHTML = `
+        <h3>Select Friends</h3>
+        <p class="doi-newconvo-sub">You can add ${Math.max(0, 9 - n)} more friend${9-n===1?'':'s'}.</p>
+        <div class="doi-pick-list">${rows}</div>
+        <div class="doi-modal-actions">
+          <button class="doi-btn-cancel" data-close-modal>Cancel</button>
+          <button class="doi-btn-primary" data-newconvo-go ${n?'':'disabled'}>${n>1?'Create Group DM':'Create DM'}</button>
+        </div>`;
+      $$('[data-pick]', body).forEach(cb => cb.addEventListener('change', () => {
+        const k = cb.dataset.pick;
+        if (cb.checked) picked.add(k); else picked.delete(k);
+        render();
+      }));
+      body.querySelector('[data-close-modal]').addEventListener('click', () => modal.hidden = true);
+      body.querySelector('[data-newconvo-go]')?.addEventListener('click', async () => {
+        const keys = [...picked];
+        if (!keys.length) return;
+        modal.hidden = true;
+        try {
+          if (keys.length === 1) { await openDM(keys[0]); }
+          else {
+            const r = await api.createGroup('', keys);
+            cache.groupsFull[r.group.id] = r.group;
+            await loadDMs();
+            await openGroup(r.group.id);
+          }
+        } catch (e) { alert('Failed: ' + e.message); }
+      });
+    }
+    render();
+    modal.hidden = false;
+    modal.onclick = e => { if (e.target === modal) modal.hidden = true; };
+  }
+
+  /* ---------- GROUP INVITE ---------- */
+  function openGroupInvite(gid) {
+    const g = cache.groupsFull[gid];
+    if (!g) return;
+    const memberKeys = new Set((g.members || []).map(m => m.key));
+    const friends = (cache.friends || []).filter(f => !memberKeys.has(f.key));
+    const modal = document.getElementById('doiNewConvoModal');
+    const body = modal.querySelector('.doi-modal-inner');
+    const rows = friends.length ? friends.map(f =>
+      `<label class="doi-pick-row"><input type="checkbox" data-inv="${esc(f.key)}"/>${avatarHTML(f.name, f.avatar, 32)}<span class="doi-pick-name">${esc(f.name)}</span></label>`).join('')
+      : `<div class="doi-empty" style="padding:20px">All your friends are already here.</div>`;
+    body.innerHTML = `
+      <h3>Add to Group</h3>
+      <div class="doi-pick-list">${rows}</div>
+      <div class="doi-modal-actions">
+        <button class="doi-btn-cancel" data-close-modal>Cancel</button>
+        <button class="doi-btn-primary" data-inv-go>Add</button>
+      </div>`;
+    body.querySelector('[data-close-modal]').addEventListener('click', () => modal.hidden = true);
+    body.querySelector('[data-inv-go]').addEventListener('click', async () => {
+      const keys = $$('[data-inv]:checked', body).map(cb => cb.dataset.inv);
+      modal.hidden = true;
+      try {
+        for (const k of keys) await api.groupInvite(gid, k);
+        await loadGroup(gid); await loadDMs();
+        rerenderShell();
+      } catch (e) { alert('Add failed: ' + e.message); }
+    });
+    modal.hidden = false;
+    modal.onclick = e => { if (e.target === modal) modal.hidden = true; };
+  }
+
+  /* ---------- GROUP SETTINGS ---------- */
+  function openGroupSettings(gid) {
+    const g = cache.groupsFull[gid];
+    if (!g) return;
+    const modal = document.getElementById('doiNewConvoModal');
+    const body = modal.querySelector('.doi-modal-inner');
+    const members = (g.members || []).map(m =>
+      `<div class="doi-pick-row">
+        ${avatarHTML(m.name, m.avatar, 32)}
+        <span class="doi-pick-name">${esc(m.name)}${m.key===g.ownerKey?' <span class="doi-badge-owner">OWNER</span>':''}</span>
+        ${g.isOwner && m.key!==g.ownerKey ? `<button class="doi-friend-remove" data-kick="${esc(m.key)}" title="Remove">×</button>` : ''}
+      </div>`).join('');
+    body.innerHTML = `
+      <h3>Group Settings</h3>
+      <div class="doi-field"><label>Group Name</label>
+        <input id="doiGrpName" maxlength="40" value="${esc(g.name||'')}" placeholder="${esc(g.autoName||'Group')}"/>
+        <div class="doi-hint">Leave blank to use member names.</div>
+      </div>
+      <div class="doi-sec-title" style="margin:10px 0 6px">Members · <b>${(g.members||[]).length}</b></div>
+      <div class="doi-pick-list">${members}</div>
+      <div style="display:flex;gap:10px;margin-top:14px">
+        ${g.isOwner ? `<button class="doi-btn-primary" id="doiGrpSave" style="flex:1">Save</button>` : ''}
+        <button class="doi-btn-danger" id="doiGrpLeave" style="flex:1;padding:10px">Leave Group</button>
+      </div>`;
+    body.querySelector('#doiGrpSave')?.addEventListener('click', async () => {
+      try {
+        const r = await api.groupSettings(gid, { name: body.querySelector('#doiGrpName').value.trim() });
+        cache.groupsFull[gid] = r.group; await loadDMs();
+        modal.hidden = true; rerenderShell();
+      } catch (e) { alert('Save failed: ' + e.message); }
+    });
+    body.querySelector('#doiGrpLeave').addEventListener('click', async () => {
+      if (!confirm('Leave this group?')) return;
+      try {
+        await api.groupLeave(gid);
+        if (state.groupWith === gid) { state.homeView = 'friends'; state.groupWith = null; }
+        delete cache.groupsFull[gid]; await loadDMs();
+        modal.hidden = true; rerenderShell();
+      } catch (e) { alert('Leave failed: ' + e.message); }
+    });
+    $$('[data-kick]', body).forEach(b => b.addEventListener('click', async () => {
+      try { const r = await api.groupRemove(gid, b.dataset.kick); cache.groupsFull[gid] = r.group; openGroupSettings(gid); }
+      catch (e) { alert('Remove failed: ' + e.message); }
+    }));
+    modal.hidden = false;
+    modal.onclick = e => { if (e.target === modal) modal.hidden = true; };
   }
 
   /* ---------- MINI SELF POPUP (bottom-left of screen) ---------- */
@@ -1068,7 +1387,7 @@
         <h2>About DOI</h2>
         <p style="color:#c0c0c0"><b>Department of Insurgency</b> — Site-CI Terminal</p>
         <p style="color:#a0a0a0;font-size:13px">Server: same-origin Node process on Sparkedhost.</p>
-        <p style="color:#a0a0a0;font-size:13px">Client build: 20260715e</p>
+        <p style="color:#a0a0a0;font-size:13px">Client build: 20260716a</p>
         <p style="color:#a0a0a0;font-size:13px">Motto: Dismantling Greed</p>`;
     }
     modal.innerHTML = `
@@ -1235,6 +1554,20 @@
     // Reuse rerenderShell — cheap enough since it's HTML strings only.
     rerenderShell();
   }
+  // Full shell rebuild that preserves the composer's text + focus. Safe to
+  // call for sidebar changes (no double-wiring: old nodes are discarded).
+  function rerenderShellKeepComposer() {
+    const container = document.getElementById('content');
+    if (!container) return;
+    const activeComposer = document.activeElement && document.activeElement.matches('.doi-composer input');
+    const val = activeComposer ? document.activeElement.value : null;
+    rerenderShell();
+    if (val != null) {
+      const inp = container.querySelector('.doi-composer input');
+      if (inp) { inp.focus(); inp.value = val; }
+    }
+  }
+  function rerenderSidebarOnly() { rerenderShellKeepComposer(); }
   function rerenderMainSoft() {
     const container = document.getElementById('content');
     if (!container) return;
@@ -1258,6 +1591,20 @@
   }
 
   /* ---------- WIRING ---------- */
+  // Resolve which message store the current view is editing.
+  function msgCtx() {
+    if (state.server === 'home' && state.homeView === 'group' && state.groupWith) {
+      const gid = state.groupWith;
+      return { group: true, gid, list: () => (cache.groupMessages[gid] || (cache.groupMessages[gid] = [])) };
+    }
+    if (state.server === 'home' && state.homeView === 'dm' && state.dmWith) {
+      const dmKey = state.dmWith;
+      return { dm: true, dmKey, list: () => (cache.dmMessages[dmKey] || (cache.dmMessages[dmKey] = [])) };
+    }
+    const key = state.server + ':' + state.channel;
+    return { channel: true, list: () => (cache.chat[key] || (cache.chat[key] = [])) };
+  }
+
   function wireMainOnly(container) {
     // composer (channel or DM)
     const form = container.querySelector('[data-composer]');
@@ -1267,9 +1614,11 @@
       if (inputEl) inputEl.addEventListener('keydown', ev => {
         if (ev.key !== 'ArrowUp' || inputEl.value.trim()) return;
         // find my last message and trigger its edit affordance
+        const gid = form.dataset.gid;
         const isDM = form.dataset.dm;
-        const list = isDM ? (cache.dmMessages[state.dmWith] || [])
-                          : (cache.chat[state.server + ':' + state.channel] || []);
+        const list = gid ? (cache.groupMessages[gid] || [])
+                    : isDM ? (cache.dmMessages[state.dmWith] || [])
+                    : (cache.chat[state.server + ':' + state.channel] || []);
         const me = cache.profile;
         if (!me) return;
         for (let i = list.length - 1; i >= 0; i--) {
@@ -1290,13 +1639,28 @@
         if (!text) return;
         input.disabled = true;
         try {
-          if (form.dataset.dm) {
+          const gid = form.dataset.gid;
+          if (gid) {
+            const r = await api.sendGroup(gid, text);
+            const list = cache.groupMessages[gid] || (cache.groupMessages[gid] = []);
+            list.push(r.message);
+            cache.groupSince[gid] = r.message.ts;
+            input.value = '';
+            bumpConvo('group', gid, r.message.text, r.message.ts);
+            rerenderShellKeepComposer();
+          } else if (form.dataset.dm) {
             const otherKey = state.dmWith;
             if (!otherKey) return;
+            const wasNew = !(cache.dms || []).some(c => c.kind !== 'group' && c.other && c.other.key === otherKey);
             const r = await api.sendDM(otherKey, text);
             const list = cache.dmMessages[otherKey] || (cache.dmMessages[otherKey] = []);
             list.push(r.message);
             cache.dmSince[otherKey] = r.message.ts;
+            input.value = '';
+            ensureConvoInList('dm', otherKey);
+            bumpConvo('dm', otherKey, r.message.text, r.message.ts);
+            // new conversation needs the sidebar rebuilt; otherwise soft-render main
+            if (wasNew) rerenderShellKeepComposer(); else rerenderMainSoft();
           } else {
             if (state.server === 'home' || !state.channel) return;
             const r = await api.sendChat(state.server, state.channel, text);
@@ -1304,12 +1668,15 @@
             const list = cache.chat[key] || (cache.chat[key] = []);
             list.push(r.message);
             cache.chatSince[key] = r.message.ts;
+            input.value = '';
+            rerenderMainSoft();
           }
-          input.value = '';
-          rerenderMainSoft();
         } catch (e2) {
           alert('Send failed: ' + e2.message);
-        } finally { input.disabled = false; input.focus(); }
+        } finally {
+          const inp2 = form.querySelector('input');
+          if (inp2) { inp2.disabled = false; inp2.focus(); }
+        }
       });
     }
     // send friend request
@@ -1379,18 +1746,12 @@
         if (!mid) return;
         if (!confirm('Delete this message?')) return;
         try {
-          const isDM = state.server === 'home' && state.dmWith;
-          if (isDM) await api.delDM(state.dmWith, mid);
-          else      await api.delChat(state.server, state.channel, mid);
-          // remove from cache immediately
-          if (isDM) {
-            const list = cache.dmMessages[state.dmWith] || [];
-            const i = list.findIndex(x => x.id === mid); if (i !== -1) list.splice(i, 1);
-          } else {
-            const key = state.server + ':' + state.channel;
-            const list = cache.chat[key] || [];
-            const i = list.findIndex(x => x.id === mid); if (i !== -1) list.splice(i, 1);
-          }
+          const ctx = msgCtx();
+          if (ctx.group) await api.delGroupMsg(ctx.gid, mid);
+          else if (ctx.dm) await api.delDM(ctx.dmKey, mid);
+          else await api.delChat(state.server, state.channel, mid);
+          const list = ctx.list();
+          const i = list.findIndex(x => x.id === mid); if (i !== -1) list.splice(i, 1);
           rerenderMainSoft();
         } catch (e2) { alert('Delete failed: ' + e2.message); }
       });
@@ -1414,17 +1775,12 @@
           const v = ta.value.trim();
           if (!v || v === cur) return cancel();
           try {
-            const isDM = state.server === 'home' && state.dmWith;
-            const r = isDM ? await api.editDM(state.dmWith, mid, v) : await api.editChat(state.server, state.channel, mid, v);
-            const msg = r.message;
-            if (isDM) {
-              const list = cache.dmMessages[state.dmWith] || [];
-              const i = list.findIndex(x => x.id === mid); if (i !== -1) list[i] = msg;
-            } else {
-              const key = state.server + ':' + state.channel;
-              const list = cache.chat[key] || [];
-              const i = list.findIndex(x => x.id === mid); if (i !== -1) list[i] = msg;
-            }
+            const ctx = msgCtx();
+            const r = ctx.group ? await api.editGroupMsg(ctx.gid, mid, v)
+                    : ctx.dm ? await api.editDM(ctx.dmKey, mid, v)
+                    : await api.editChat(state.server, state.channel, mid, v);
+            const list = ctx.list();
+            const i = list.findIndex(x => x.id === mid); if (i !== -1) list[i] = r.message;
             rerenderMainSoft();
           } catch (er) { alert('Edit failed: ' + er.message); cancel(); }
         };
@@ -1458,8 +1814,12 @@
         state.homeView = 'friends';
       }
       else if (t === 'dm') {
-        state.homeView = 'dm'; state.dmWith = el.dataset.dmKey;
+        state.homeView = 'dm'; state.dmWith = el.dataset.dmKey; state.groupWith = null;
         await loadDMMessages(state.dmWith);
+      }
+      else if (t === 'group') {
+        state.homeView = 'group'; state.groupWith = el.dataset.gid; state.dmWith = null;
+        await loadGroup(state.groupWith);
       }
       else if (t === 'server') {
         state.server = el.dataset.sid; state.channel = null;
@@ -1494,12 +1854,59 @@
       } catch (er) { alert('Close failed: ' + er.message); }
     }));
 
-    // new DM prompt
-    $$('[data-shell-newdm]', container).forEach(el => el.addEventListener('click', async () => {
-      const call = prompt('Callsign of the operative to message:');
-      if (!call) return;
-      await openDM(call.toLowerCase());
+    // new DM / group → friend-picker modal
+    $$('[data-shell-newdm]', container).forEach(el => el.addEventListener('click', () => openNewConvo()));
+
+    // soft (placeholder) features → small toast
+    $$('[data-shell-soft]', container).forEach(el => el.addEventListener('click', e => {
+      e.stopPropagation();
+      toast(el.dataset.shellSoft + ' — coming soon');
     }));
+
+    // group: leave / invite / settings
+    $$('[data-group-leave]', container).forEach(b => b.addEventListener('click', async e => {
+      e.stopPropagation();
+      const gid = b.dataset.groupLeave;
+      if (!confirm('Leave this group?')) return;
+      try {
+        await api.groupLeave(gid);
+        if (state.groupWith === gid) { state.homeView = 'friends'; state.groupWith = null; }
+        delete cache.groupsFull[gid];
+        await loadDMs();
+        rerenderShell();
+      } catch (er) { alert('Leave failed: ' + er.message); }
+    }));
+    $$('[data-group-invite]', container).forEach(b => b.addEventListener('click', e => {
+      e.stopPropagation();
+      openGroupInvite(b.dataset.groupInvite);
+    }));
+    $$('[data-group-settings]', container).forEach(b => b.addEventListener('click', e => {
+      e.stopPropagation();
+      openGroupSettings(b.dataset.groupSettings);
+    }));
+
+    // "Find or start a conversation" search — purely visual, toggles row
+    // visibility so existing click handlers stay intact (no re-wiring).
+    const dmSearch = container.querySelector('#doi-dm-search');
+    if (dmSearch && !dmSearch.dataset.wired) {
+      dmSearch.dataset.wired = '1';
+      dmSearch.addEventListener('input', () => {
+        state.dmSearch = dmSearch.value;
+        const term = dmSearch.value.trim().toLowerCase();
+        let shown = 0;
+        $$('#doi-dm-list .doi-dm-row', container).forEach(row => {
+          const hit = !term || (row.dataset.title || '').includes(term);
+          row.style.display = hit ? '' : 'none';
+          if (hit) shown++;
+        });
+        let empty = container.querySelector('#doi-dm-empty-hint');
+        const list = container.querySelector('#doi-dm-list');
+        if (!shown && list) {
+          if (!empty) { empty = document.createElement('div'); empty.id = 'doi-dm-empty-hint'; empty.className = 'doi-empty'; empty.style.cssText = 'padding:12px 8px;font-size:11px'; list.appendChild(empty); }
+          empty.textContent = term ? 'no matches' : 'no conversations yet';
+        } else if (empty) { empty.remove(); }
+      });
+    }
 
     // user-panel controls (mute/deafen are visual state only; settings opens modal)
     $$('[data-shell-toggle-mute]', container).forEach(b => b.addEventListener('click', () => b.classList.toggle('active')));
@@ -1684,7 +2091,7 @@
       cache.profile = r.profile;
       applyTheme();
       // preload core data once, then let render happen
-      await Promise.all([loadServers(), loadFriends()]);
+      await Promise.all([loadServers(), loadFriends(), loadFriendRequests(), loadDMs()]);
       // pre-select flagship server → first channel so users land in something usable
       if (state.server === 'home' && cache.servers && cache.servers.length) {
         // stay on home; user sees Friends first (Discord-like)

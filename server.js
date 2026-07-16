@@ -145,7 +145,7 @@ const WORLD_TTL = 15000;
 
 /* ---- DOI network (servers, channels, chat, friends, DMs, profiles) ---- */
 const DOI_FILE = path.join(__dirname, "doi.json");
-let doiStore = { servers: {}, friends: {}, friendReqs: {}, dms: {}, profiles: {}, hiddenDMs: {} };
+let doiStore = { servers: {}, friends: {}, friendReqs: {}, dms: {}, profiles: {}, hiddenDMs: {}, groups: {} };
 try {
   const loaded = JSON.parse(fs.readFileSync(DOI_FILE, "utf8"));
   if (loaded && typeof loaded === "object") {
@@ -155,6 +155,7 @@ try {
     doiStore.dms        = (loaded.dms        && typeof loaded.dms        === "object") ? loaded.dms        : {};
     doiStore.profiles   = (loaded.profiles   && typeof loaded.profiles   === "object") ? loaded.profiles   : {};
     doiStore.hiddenDMs  = (loaded.hiddenDMs  && typeof loaded.hiddenDMs  === "object") ? loaded.hiddenDMs  : {};
+    doiStore.groups     = (loaded.groups     && typeof loaded.groups     === "object") ? loaded.groups     : {};
   }
 } catch (_) {}
 
@@ -235,6 +236,29 @@ function dmPairKey(a, b) { return a < b ? a + "|" + b : b + "|" + a; }
 function areFriends(a, b) {
   return (doiStore.friends[a] || []).includes(b);
 }
+// Group-DM descriptor. When `full`, includes messages.
+function doiGroupBrief(g, userKey, full) {
+  const members = (g.members || []).map(k => doiProfile(k));
+  const msgs = g.messages || [];
+  const last = msgs[msgs.length - 1] || null;
+  const auto = members.filter(m => m.key !== userKey).map(m => m.name).join(", ") || "Empty group";
+  const brief = {
+    id: g.id, kind: "group",
+    name: g.name || auto,
+    autoName: auto,
+    icon: g.icon || null,
+    ownerKey: g.ownerKey,
+    isOwner: g.ownerKey === userKey,
+    members,
+    memberCount: members.length,
+    created: g.created,
+    lastTs: last ? last.ts : g.created,
+    lastText: last ? ((last.from ? last.from + ": " : "") + last.text) : "",
+  };
+  if (full) brief.messages = msgs;
+  return brief;
+}
+function groupHasMember(g, key) { return (g.members || []).includes(key); }
 function hashCode(s) { let h = 0; for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0; return h; }
 
 // Return a compact server descriptor (no chat, no member details) for lists.
@@ -839,6 +863,140 @@ async function handleApi(req, res, urlPath, query) {
     return sendJSON(res, { ok: true });
   }
 
+  /* ---- group DMs ---- */
+  if (urlPath === "/api/doi/groups" && req.method === "POST") {
+    const m = await readBody(req);
+    const u = doiUserFromToken(m.token);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    // members: array of callsigns (or keys). Always includes creator.
+    const raw = Array.isArray(m.members) ? m.members : [];
+    const memberKeys = new Set([u.key]);
+    for (const c of raw) {
+      const k = String(c || "").trim().toLowerCase();
+      if (k && accounts.users[k]) memberKeys.add(k);
+    }
+    if (memberKeys.size < 2) return sendJSON(res, { error: "pick at least one other operative" }, 400);
+    const id = "grp-" + crypto.randomBytes(6).toString("hex");
+    const g = {
+      id, name: String(m.name || "").slice(0, 40), icon: null,
+      ownerKey: u.key, members: [...memberKeys], created: Date.now(), messages: [],
+    };
+    doiStore.groups[id] = g;
+    saveDoi();
+    return sendJSON(res, { ok: true, group: doiGroupBrief(g, u.key, true) });
+  }
+  {
+    const mm = urlPath.match(/^\/api\/doi\/groups\/([^/]+)$/);
+    if (mm && req.method === "GET") {
+      const u = doiUserFromToken(query.get("token") || "");
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const g = doiStore.groups[mm[1]];
+      if (!g) return sendJSON(res, { error: "not found" }, 404);
+      if (!groupHasMember(g, u.key)) return sendJSON(res, { error: "not a member" }, 403);
+      return sendJSON(res, { ok: true, group: doiGroupBrief(g, u.key, true) });
+    }
+  }
+  {
+    const mm = urlPath.match(/^\/api\/doi\/groups\/([^/]+)\/(invite|leave|settings|remove)$/);
+    if (mm && req.method === "POST") {
+      const m = await readBody(req);
+      const u = doiUserFromToken(m.token);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const g = doiStore.groups[mm[1]];
+      if (!g) return sendJSON(res, { error: "not found" }, 404);
+      if (!groupHasMember(g, u.key)) return sendJSON(res, { error: "not a member" }, 403);
+      const op = mm[2];
+      if (op === "invite") {
+        const k = String(m.callsign || "").trim().toLowerCase();
+        if (!accounts.users[k]) return sendJSON(res, { error: "no such operative" }, 404);
+        if (!g.members.includes(k)) {
+          g.members.push(k);
+          g.messages.push({ id: "g-" + crypto.randomBytes(4).toString("hex"), system: true, ts: Date.now(),
+            text: (accounts.users[k].user) + " was added to the group." });
+        }
+        saveDoi();
+        return sendJSON(res, { ok: true, group: doiGroupBrief(g, u.key, true) });
+      }
+      if (op === "remove") {
+        if (g.ownerKey !== u.key) return sendJSON(res, { error: "owner only" }, 403);
+        const k = String(m.callsign || "").trim().toLowerCase();
+        g.members = g.members.filter(x => x !== k);
+        if (accounts.users[k]) g.messages.push({ id: "g-" + crypto.randomBytes(4).toString("hex"), system: true, ts: Date.now(),
+          text: accounts.users[k].user + " was removed from the group." });
+        saveDoi();
+        return sendJSON(res, { ok: true, group: doiGroupBrief(g, u.key, true) });
+      }
+      if (op === "settings") {
+        if (typeof m.name === "string") g.name = m.name.slice(0, 40);
+        if (typeof m.icon === "string" && m.icon.length < 260_000) g.icon = m.icon;
+        saveDoi();
+        return sendJSON(res, { ok: true, group: doiGroupBrief(g, u.key, true) });
+      }
+      if (op === "leave") {
+        g.members = g.members.filter(x => x !== u.key);
+        g.messages.push({ id: "g-" + crypto.randomBytes(4).toString("hex"), system: true, ts: Date.now(),
+          text: u.name + " left the group." });
+        if (g.ownerKey === u.key) g.ownerKey = g.members[0] || g.ownerKey; // hand off
+        if (g.members.length === 0) delete doiStore.groups[g.id];         // last one out
+        saveDoi();
+        return sendJSON(res, { ok: true, left: true });
+      }
+    }
+  }
+  {
+    const mm = urlPath.match(/^\/api\/doi\/groups\/([^/]+)\/messages$/);
+    if (mm) {
+      const g = doiStore.groups[mm[1]];
+      if (!g) return sendJSON(res, { error: "not found" }, 404);
+      if (req.method === "GET") {
+        const u = doiUserFromToken(query.get("token") || "");
+        if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+        if (!groupHasMember(g, u.key)) return sendJSON(res, { error: "not a member" }, 403);
+        const since = parseInt(query.get("since") || "0", 10) || 0;
+        const all = g.messages || [];
+        const msgs = since ? all.filter(x => x.ts > since) : all;
+        return sendJSON(res, { ok: true, messages: msgs, now: Date.now() });
+      }
+      if (req.method === "POST") {
+        const m = await readBody(req);
+        const u = doiUserFromToken(m.token);
+        if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+        if (!groupHasMember(g, u.key)) return sendJSON(res, { error: "not a member" }, 403);
+        const text = String(m.text || "").trim().slice(0, 2000);
+        if (!text) return sendJSON(res, { error: "empty message" }, 400);
+        const post = { id: "g-" + crypto.randomBytes(5).toString("hex"), from: u.name, fromKey: u.key, ts: Date.now(), text };
+        g.messages.push(post);
+        if (g.messages.length > DOI_MSG_CAP) g.messages.splice(0, g.messages.length - DOI_MSG_CAP);
+        saveDoi();
+        return sendJSON(res, { ok: true, message: post });
+      }
+    }
+  }
+  {
+    const mm = urlPath.match(/^\/api\/doi\/groups\/([^/]+)\/messages\/(edit|delete)$/);
+    if (mm && req.method === "POST") {
+      const m = await readBody(req);
+      const u = doiUserFromToken(m.token);
+      if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+      const g = doiStore.groups[mm[1]];
+      if (!g) return sendJSON(res, { error: "not found" }, 404);
+      if (!groupHasMember(g, u.key)) return sendJSON(res, { error: "not a member" }, 403);
+      const list = g.messages || [];
+      const idx = list.findIndex(x => x.id === m.mid);
+      if (idx === -1) return sendJSON(res, { error: "message not found" }, 404);
+      const msg = list[idx];
+      const isAuthor = msg.fromKey === u.key;
+      const isOwner  = g.ownerKey === u.key;
+      if (!isAuthor && !(isOwner && mm[2] === "delete")) return sendJSON(res, { error: "not allowed" }, 403);
+      if (mm[2] === "delete") { list.splice(idx, 1); saveDoi(); return sendJSON(res, { ok: true, deleted: m.mid }); }
+      const text = String(m.text || "").trim().slice(0, 2000);
+      if (!text) return sendJSON(res, { error: "empty message" }, 400);
+      msg.text = text; msg.edited = Date.now();
+      saveDoi();
+      return sendJSON(res, { ok: true, message: msg });
+    }
+  }
+
   /* ---- direct messages ---- */
   if (urlPath === "/api/doi/dms" && req.method === "GET") {
     const tok = query.get("token") || "";
@@ -847,6 +1005,11 @@ async function handleApi(req, res, urlPath, query) {
     const hidden = new Set(doiStore.hiddenDMs[u.key] || []);
     const seen = new Set();
     const convos = [];
+    // 0) group DMs the user belongs to
+    for (const gid in doiStore.groups) {
+      const g = doiStore.groups[gid];
+      if (groupHasMember(g, u.key)) convos.push(doiGroupBrief(g, u.key));
+    }
     // 1) all conversations with any past messages
     for (const pk in doiStore.dms) {
       const parts = pk.split("|");
@@ -855,7 +1018,7 @@ async function handleApi(req, res, urlPath, query) {
         if (hidden.has(other)) continue;
         const msgs = doiStore.dms[pk] || [];
         const last = msgs[msgs.length - 1] || null;
-        convos.push({ other: doiProfile(other), lastTs: last ? last.ts : 0, lastText: last ? last.text : "" });
+        convos.push({ kind: "dm", other: doiProfile(other), lastTs: last ? last.ts : 0, lastText: last ? last.text : "" });
         seen.add(other);
       }
     }
@@ -863,7 +1026,7 @@ async function handleApi(req, res, urlPath, query) {
     //    placeholder DM rows until the user closes them with the X)
     for (const fk of (doiStore.friends[u.key] || [])) {
       if (seen.has(fk) || hidden.has(fk)) continue;
-      convos.push({ other: doiProfile(fk), lastTs: 0, lastText: "" });
+      convos.push({ kind: "dm", other: doiProfile(fk), lastTs: 0, lastText: "" });
     }
     convos.sort((a, b) => b.lastTs - a.lastTs);
     return sendJSON(res, { ok: true, dms: convos });
