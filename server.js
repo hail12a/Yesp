@@ -193,15 +193,35 @@ if (!doiStore.servers[DOI_FLAGSHIP_ID]) {
   };
 }
 
+// --- Token economy ---
+const TOKEN_CLAIM_AMOUNT   = 20;                 // tokens per claim
+const TOKEN_CLAIM_INTERVAL = 18 * 60 * 60 * 1000; // every 18 hours
+const TOKEN_START_BALANCE  = 100;                // new users start with this
+
 // Seed a starter shop on first boot. Items are owner-editable at runtime.
-// kind: "premium" | "decoration" | "nameplate" | "effect" | "frame"
+// Prices are in TOKENS. kind: "premium" | "decoration" | "nameplate" | "effect" | "frame"
 if (!doiStore.shop) {
   doiStore.shop = { items: [
-    { id: "sku-premium",   kind: "premium",    name: "Novalis Premium", price: 9.99, image: "", desc: "Custom accent, bubble effects, profile flair." },
-    { id: "sku-bonsai",    kind: "effect",     name: "Bonsai Eternity", price: 4.99, image: "", desc: "Drifting pink bonsai leaves across your profile." },
-    { id: "sku-dreamhop",  kind: "nameplate",  name: "Dream Hop",       price: 3.99, image: "", desc: "A winged bunny hops behind your name." },
-    { id: "sku-crystals",  kind: "frame",      name: "Crystals",        price: 4.99, image: "", desc: "Purple crystal clusters crown your avatar." },
-    { id: "sku-chillet",   kind: "decoration", name: "Chillet",         price: 8.99, image: "", desc: "A frosty companion hugs your avatar." }
+    { id: "sku-premium",   kind: "premium",    name: "Novalis Premium", price: 500, image: "", desc: "Custom accent, bubble effects, and profile flair." },
+    // Avatar decorations (100 tokens each)
+    { id: "sku-chillet",   kind: "decoration", name: "Chillet",         price: 100, image: "", desc: "A frosty companion hugs your avatar." },
+    { id: "sku-meowcat",   kind: "decoration", name: "Meow Meow Cat",   price: 100, image: "", desc: "A sleepy kitten curls around your avatar." },
+    { id: "sku-halo",      kind: "decoration", name: "Golden Halo",     price: 100, image: "", desc: "A radiant halo floats above you." },
+    { id: "sku-emberring", kind: "decoration", name: "Ember Ring",      price: 120, image: "", desc: "A ring of soft embers orbits your avatar." },
+    // Profile effects (150 tokens each)
+    { id: "sku-bonsai",    kind: "effect",     name: "Bonsai Eternity", price: 150, image: "", desc: "Drifting pink bonsai leaves across your profile." },
+    { id: "sku-fallstars", kind: "effect",     name: "Falling Stars",   price: 150, image: "", desc: "Comets and stardust streak behind you." },
+    { id: "sku-nevermore", kind: "effect",     name: "Nevermore",       price: 180, image: "", desc: "Ravens drift through a midnight haze." },
+    { id: "sku-hellokit",  kind: "effect",     name: "Hello Kitty",     price: 200, image: "", desc: "Cherry-blossom charm across your card." },
+    // Nameplates (120 tokens each)
+    { id: "sku-dreamhop",  kind: "nameplate",  name: "Dream Hop",       price: 120, image: "", desc: "A winged bunny hops behind your name." },
+    { id: "sku-starstruck",kind: "nameplate",  name: "Star Struck",     price: 120, image: "", desc: "A moonlit night behind your name." },
+    { id: "sku-blossom",   kind: "nameplate",  name: "Blossoming Branch",price: 120, image: "", desc: "Soft petals bloom behind your name." },
+    // Profile frames (150 tokens each)
+    { id: "sku-crystals",  kind: "frame",      name: "Crystals",        price: 150, image: "", desc: "Purple crystal clusters crown your avatar." },
+    { id: "sku-mariposa",  kind: "frame",      name: "Mariposa",        price: 150, image: "", desc: "Glowing butterfly wings frame your avatar." },
+    { id: "sku-darkroses", kind: "frame",      name: "Dark Roses",      price: 150, image: "", desc: "Twisting roses border your profile." },
+    { id: "sku-neonchaos", kind: "frame",      name: "Neon Chaos",      price: 170, image: "", desc: "Electric neon vines around your avatar." }
   ] };
 }
 
@@ -243,6 +263,13 @@ function doiProfile(key) {
     premium: !!p.premium,                           // has Novalis Premium
     owned: Array.isArray(p.owned) ? p.owned : [],   // owned shop item ids
     equipped: (p.equipped && typeof p.equipped === "object") ? p.equipped : {},  // {decoration,effect,nameplate,frame} -> itemId
+    tokens: (typeof p.tokens === "number") ? p.tokens : TOKEN_START_BALANCE,     // shop currency
+    claimAmount: TOKEN_CLAIM_AMOUNT,
+    claimIn: (function () {                          // ms until next free claim (0 = ready now)
+      const last = p.lastClaim || 0;
+      const wait = last + TOKEN_CLAIM_INTERVAL - Date.now();
+      return wait > 0 ? wait : 0;
+    })(),
     joined: (rec && rec.created) || Date.now(),
     isDOI: !!(rec && rec.user === "DOI")
   };
@@ -564,6 +591,21 @@ async function handleApi(req, res, urlPath, query) {
     saveDoi();
     return sendJSON(res, { ok: true, items: doiStore.shop.items });
   }
+  if (urlPath === "/api/doi/shop/claim" && req.method === "POST") {
+    const m = await readBody(req);
+    const u = doiUserFromToken(m.token);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    const p = doiStore.profiles[u.key] || {};
+    if (typeof p.tokens !== "number") p.tokens = TOKEN_START_BALANCE;
+    const last = p.lastClaim || 0;
+    const wait = last + TOKEN_CLAIM_INTERVAL - Date.now();
+    if (wait > 0) return sendJSON(res, { error: "Not ready yet", claimIn: wait }, 429);
+    p.tokens += TOKEN_CLAIM_AMOUNT;
+    p.lastClaim = Date.now();
+    doiStore.profiles[u.key] = p;
+    saveDoi();
+    return sendJSON(res, { ok: true, profile: doiProfile(u.key), gained: TOKEN_CLAIM_AMOUNT });
+  }
   if (urlPath === "/api/doi/shop/buy" && req.method === "POST") {
     const m = await readBody(req);
     const u = doiUserFromToken(m.token);
@@ -572,11 +614,20 @@ async function handleApi(req, res, urlPath, query) {
     if (!item) return sendJSON(res, { error: "No such item" }, 404);
     const p = doiStore.profiles[u.key] || {};
     p.owned = Array.isArray(p.owned) ? p.owned : [];
+    if (typeof p.tokens !== "number") p.tokens = TOKEN_START_BALANCE;
+    if (p.owned.includes(item.id) || (item.kind === "premium" && p.premium)) {
+      return sendJSON(res, { error: "Already owned" }, 400);
+    }
+    const price = Math.max(0, Number(item.price) || 0);
+    if (p.tokens < price) {
+      return sendJSON(res, { error: "Not enough tokens", need: price, have: p.tokens }, 402);
+    }
+    p.tokens -= price;
     if (!p.owned.includes(item.id)) p.owned.push(item.id);
     if (item.kind === "premium") p.premium = true;
     doiStore.profiles[u.key] = p;
     saveDoi();
-    return sendJSON(res, { ok: true, profile: doiProfile(u.key) });
+    return sendJSON(res, { ok: true, profile: doiProfile(u.key), spent: price });
   }
   if (urlPath === "/api/doi/shop/equip" && req.method === "POST") {
     const m = await readBody(req);

@@ -44,11 +44,13 @@
   const state = window.__doiHomeState = window.__doiHomeState || {
     server: 'home',                    // 'home' or serverId
     channel: null,                     // channelId within current server
-    homeView: 'friends',               // 'friends' | 'dm' | 'group'
+    homeView: 'friends',               // 'friends' | 'dm' | 'group' | 'shop'
     friendTab: 'all',                  // 'online' | 'all' | 'pending' | 'add'
     dmWith: null,                      // userKey when homeView='dm'
     groupWith: null,                   // groupId when homeView='group'
     dmSearch: '',                      // filter for "Find or start a conversation"
+    shopTab: 'all',                    // 'premium' hero-focus | 'all'
+    shopCat: 'all',                    // category filter within the shop page
   };
 
   /* ---------- API ---------- */
@@ -75,6 +77,7 @@
     shopAdmin: (patch) => jfetch('/api/doi/shop/admin', { method: 'POST', body: JSON.stringify({ token: cache.token, ...patch }) }),
     shopBuy:   (id) => jfetch('/api/doi/shop/buy',   { method: 'POST', body: JSON.stringify({ token: cache.token, id }) }),
     shopEquip: (patch) => jfetch('/api/doi/shop/equip', { method: 'POST', body: JSON.stringify({ token: cache.token, ...patch }) }),
+    shopClaim: () => jfetch('/api/doi/shop/claim', { method: 'POST', body: JSON.stringify({ token: cache.token }) }),
 
     servers:      () => jfetch('/api/doi/servers?token=' + q(cache.token || '')),
     server:       (id) => jfetch('/api/doi/servers/' + q(id) + '?token=' + q(cache.token || '')),
@@ -470,11 +473,11 @@
               <span>Friends</span>
               ${reqCount ? `<span class="doi-badge-count">${reqCount}</span>` : ''}
             </div>
-            <div class="doi-home-nav doi-home-nav-soft" data-shell-shop="1">
+            <div class="doi-home-nav doi-home-nav-soft ${state.homeView==='shop'&&state.shopTab==='premium'?'active':''}" data-shell-shop="premium">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.5 7.5H22l-6 4.5 2.5 7.5L12 17l-6.5 4.5L8 14l-6-4.5h7.5z"/></svg>
               <span>Premium</span>
             </div>
-            <div class="doi-home-nav doi-home-nav-soft" data-shell-shop="1">
+            <div class="doi-home-nav doi-home-nav-soft ${state.homeView==='shop'&&state.shopTab!=='premium'?'active':''}" data-shell-shop="all">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/></svg>
               <span>Shop</span>
             </div>
@@ -635,6 +638,7 @@
   }
 
   function renderMainHome() {
+    if (state.homeView === 'shop') return renderShopPage();
     if (state.homeView === 'dm' && state.dmWith) return renderMainDM();
     if (state.homeView === 'group' && state.groupWith) return renderMainGroup();
     return renderMainFriends();
@@ -1325,155 +1329,213 @@
   ];
   const orbSVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M16.23 12c0 1.29-.95 2.25-2.22 2.25A2.18 2.18 0 0 1 11.8 12c0-1.29.95-2.25 2.22-2.25 1.27 0 2.22.96 2.22 2.25ZM23 12c0 5.01-4 9-8.99 9a8.93 8.93 0 0 1-8.75-6.9H3.34l-.9-4.2H5.3c.26-.96.68-1.89 1.21-2.7H1.89L1 3h12.74C19.13 3 23 6.99 23 12Z"/></svg>';
 
-  async function openShop() {
-    const modal = document.getElementById('doiShopModal');
-    if (!modal) return;
-    modal.hidden = false;
-    modal.innerHTML = `<div class="doi-shop"><div class="doi-shop-hero"><p class="doi-shop-eyebrow">Novalis Shop</p><h1>Loading…</h1></div></div>
-      <button class="doi-us-close" data-close-modal title="Close (ESC)">×</button>`;
-    modal.querySelector('[data-close-modal]').addEventListener('click', () => modal.hidden = true);
-    try {
-      const r = await api.shop();
-      cache.shop = r;
-      renderShop(r);
-    } catch (e) {
-      modal.querySelector('h1').textContent = 'Shop unavailable';
-    }
+  // Token coin icon (used everywhere a price/balance shows).
+  const tokenSVG = '<svg class="doi-token-ico" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor"/><circle cx="12" cy="12" r="7.2" fill="none" stroke="rgba(0,0,0,.28)" stroke-width="1.4"/><path d="M12 7.2v9.6M9.4 9.2h3.6a1.9 1.9 0 0 1 0 3.8H9.8h3.4a1.9 1.9 0 0 1 0 3.8H9.4" fill="none" stroke="rgba(0,0,0,.55)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function fmtDuration(ms) {
+    if (ms <= 0) return 'now';
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    if (h >= 1) return `${h}h ${m}m`;
+    if (m >= 1) return `${m}m`;
+    return `${Math.max(1, Math.floor(ms / 1000))}s`;
+  }
+
+  // Colorful per-category hero gradients (Discord-like banners).
+  const CAT_HERO = {
+    all:        { title: 'THE SHOP',    grad: 'linear-gradient(120deg,#5865f2,#8b5cf6 55%,#c471ed)' },
+    decoration: { title: 'DECORATIONS', grad: 'linear-gradient(120deg,#ff6ba6,#ff9a5a 55%,#ffcf6b)' },
+    frame:      { title: 'FRAMES',      grad: 'linear-gradient(120deg,#7c4dff,#b06bff 55%,#e879f9)' },
+    effect:     { title: 'EFFECTS',     grad: 'linear-gradient(120deg,#0ea5e9,#6366f1 55%,#a855f7)' },
+    nameplate:  { title: 'NAMEPLATES',  grad: 'linear-gradient(120deg,#10b981,#22d3ee 55%,#3b82f6)' },
+    premium:    { title: 'PREMIUM',     grad: 'linear-gradient(120deg,#f59e0b,#ec4899 55%,#8b5cf6)' },
+  };
+
+  // Navigate to the shop as an in-app page (keeps the servers rail + DM list).
+  async function openShop(tab) {
+    state.server = 'home';
+    state.homeView = 'shop';
+    state.shopTab = tab === 'premium' ? 'premium' : 'all';
+    state.shopCat = tab === 'premium' ? 'premium' : 'all';
+    rerenderShell();
+    try { cache.shop = await api.shop(); rerenderMainSoft(); }
+    catch (e) { toast('Shop unavailable'); }
   }
 
   function shopCard(item, me, isOwner) {
     const owned = (me.owned || []).includes(item.id);
     const eqSlot = item.kind;
     const equipped = me.equipped && me.equipped[eqSlot] === item.id;
+    const canAfford = (me.tokens || 0) >= (item.price || 0);
     let preview;
     if (item.kind === 'decoration') {
       preview = `<div class="doi-shop-deco-ring"${item.image ? ` style="background-image:url('${esc(item.image)}')"` : ''}></div>`;
     } else if (item.kind === 'nameplate') {
-      preview = `<div class="doi-shop-nameplate-prev"${item.image ? ` style="background-image:url('${esc(item.image)}')"` : ''}>${esc((me.name || 'Operative'))}</div>`;
+      preview = `<div class="doi-shop-nameplate-prev"${item.image ? ` style="background-image:url('${esc(item.image)}')"` : ''}>${avatarHTML(me.name, me.avatar, 22)}<span>${esc(me.name || 'Operative')}</span></div>`;
     } else if (item.kind === 'frame') {
       preview = `<div class="doi-shop-frame-prev">${item.image ? `<span class="doi-shop-frame-img" style="background-image:url('${esc(item.image)}')"></span>` : ''}<span class="doi-shop-frame-face"></span></div>`;
     } else if (item.kind === 'effect') {
-      preview = `<div class="doi-shop-effect-prev">${item.image ? `<span class="doi-shop-effect-img" style="background-image:url('${esc(item.image)}')"></span>` : '<span class="doi-bubbles-scoped" aria-hidden="true">' + scopedBubbles(6) + '</span>'}</div>`;
+      preview = `<div class="doi-shop-effect-prev">${item.image ? `<span class="doi-shop-effect-img" style="background-image:url('${esc(item.image)}')"></span>` : '<span class="doi-bubbles-scoped" aria-hidden="true">' + scopedBubbles(6) + '</span>'}<span class="doi-shop-effect-face">${avatarHTML(me.name, me.avatar, 40)}</span></div>`;
     } else {
-      preview = item.image
-        ? `<img src="${esc(item.image)}" alt=""/>`
-        : `<div class="doi-shop-noimg">${orbSVG.replace('16','48').replace('16','48')}</div>`;
+      preview = item.image ? `<img src="${esc(item.image)}" alt=""/>` : `<div class="doi-shop-noimg">${tokenSVG.replace(/15/g,'46')}</div>`;
     }
     let action;
     if (item.kind === 'premium') {
       action = me.premium
         ? `<button class="doi-shop-buy owned" disabled>Owned</button>`
-        : `<button class="doi-shop-buy" data-buy="${item.id}">Get Premium</button>`;
+        : `<button class="doi-shop-buy ${canAfford?'':'poor'}" data-buy="${item.id}"${canAfford?'':' disabled'}>${canAfford?'Get Premium':'Need more'}</button>`;
     } else if (equipped) {
       action = `<button class="doi-shop-buy equipped" data-unequip="${eqSlot}">Equipped ✓</button>`;
     } else if (owned) {
       action = `<button class="doi-shop-buy" data-equip="${item.id}">Equip</button>`;
     } else {
-      action = `<button class="doi-shop-buy" data-buy="${item.id}">Buy</button>`;
+      action = `<button class="doi-shop-buy ${canAfford?'':'poor'}" data-buy="${item.id}"${canAfford?'':' disabled'}>${canAfford?'Buy':'Need more'}</button>`;
     }
     return `
-      <div class="doi-shop-card">
-        <div class="doi-shop-preview"><span class="doi-shop-badge">${esc(kindLabel(item.kind))}</span>${preview}</div>
+      <div class="doi-shop-card ${item.kind}">
+        <div class="doi-shop-preview"><span class="doi-shop-badge">${esc(kindLabel(item.kind))}</span>${preview}
+          ${isOwner ? `<button class="doi-shop-del" data-del="${item.id}" title="Remove item">✕</button>` : ''}</div>
         <div class="doi-shop-info">
           <div class="doi-shop-name">${esc(item.name)}</div>
           <div class="doi-shop-type">${esc(item.desc || '')}</div>
           <div class="doi-shop-foot">
-            <div class="doi-shop-price">${orbSVG}${item.price ? item.price.toFixed(2) : 'Free'}</div>
-            <div class="doi-shop-admin-row">
-              ${action}
-              ${isOwner ? `<button class="doi-shop-del" data-del="${item.id}" title="Remove">✕</button>` : ''}
-            </div>
+            <div class="doi-shop-price">${tokenSVG}${item.price ? item.price : 'Free'}</div>
+            ${action}
           </div>
         </div>
       </div>`;
   }
   function kindLabel(k) { return (SHOP_KINDS.find(x => x.key === k) || {}).label || k; }
 
-  function renderShop(r) {
-    const modal = document.getElementById('doiShopModal');
-    if (!modal) return;
-    const me = r.me, items = r.items || [], isOwner = r.isOwner;
+  // Build the shop as main-content HTML (head + body). Bound by wireShopPage().
+  function renderShopPage() {
+    const r = cache.shop;
+    const me = (r && r.me) || cache.profile || { tokens: 0, owned: [], equipped: {} };
+    const items = (r && r.items) || [];
+    const isOwner = !!(r && r.isOwner);
+    const cat = state.shopCat || 'all';
+    const hero = CAT_HERO[cat] || CAT_HERO.all;
     const premiumItem = items.find(i => i.kind === 'premium');
-    const cats = SHOP_KINDS.filter(k => k.key !== 'premium').map(k => {
-      const list = items.filter(i => i.kind === k.key);
-      if (!list.length) return '';
-      return `<section class="doi-shop-cat"><div class="doi-shop-cat-head"><h2>${k.label}</h2></div>
-        <div class="doi-shop-grid">${list.map(i => shopCard(i, me, isOwner)).join('')}</div></section>`;
-    }).join('');
-    modal.innerHTML = `
-      <div class="doi-shop">
-        <div class="doi-shop-hero">
-          <span class="doi-bubbles-scoped" aria-hidden="true">${scopedBubbles(12)}</span>
-          <p class="doi-shop-eyebrow">Novalis Shop</p>
-          <h1>Make it yours</h1>
-          <p>Avatar decorations, profile frames, animated effects and nameplates. ${isOwner ? 'You own this shop — add or remove anything below.' : 'Owned items can be equipped from your profile.'}</p>
-        </div>
-        <div class="doi-shop-body">
-          ${isOwner ? `
-            <div class="doi-shop-manage">
-              <h3>Manage shop (owner)</h3>
-              <div class="doi-shop-form">
-                <input id="shopName" placeholder="Item name"/>
-                <select id="shopKind">
-                  ${SHOP_KINDS.map(k => `<option value="${k.key}">${k.label}</option>`).join('')}
-                </select>
-                <input id="shopPrice" type="number" min="0" step="0.01" placeholder="Price"/>
-                <input id="shopImage" placeholder="Image URL (png/webp)"/>
-                <button class="doi-shop-buy" id="shopAdd">Add item</button>
-              </div>
-              <input id="shopDesc" placeholder="Short description (optional)"/>
-            </div>` : ''}
-          ${premiumItem ? `
-            <div class="doi-shop-premium-card">
-              <span class="doi-shop-badge">Premium</span>
-              <div style="flex:1">
-                <div class="doi-shop-name">${esc(premiumItem.name)}</div>
-                <div class="doi-shop-type">${esc(premiumItem.desc || 'Unlock custom accent, bubble effects, and profile flair.')}</div>
-              </div>
-              <div class="doi-shop-price">${orbSVG}${premiumItem.price ? premiumItem.price.toFixed(2) : 'Free'}</div>
-              ${me.premium ? `<button class="doi-shop-buy owned" disabled>Owned</button>` : `<button class="doi-shop-buy" data-buy="${premiumItem.id}">Get Premium</button>`}
-              ${isOwner ? `<button class="doi-shop-del" data-del="${premiumItem.id}" title="Remove">✕</button>` : ''}
-            </div>` : ''}
-          ${cats || '<div class="doi-empty" style="padding:20px 0;color:var(--doi-ink-4)">No items yet.</div>'}
-        </div>
-      </div>
-      <button class="doi-us-close" data-close-modal title="Close (ESC)">×</button>`;
-    modal.querySelector('[data-close-modal]').addEventListener('click', () => modal.hidden = true);
 
-    async function refresh(prof) { if (prof) cache.profile = prof; const rr = await api.shop(); cache.shop = rr; renderShop(rr); applyTheme(); mountBubbles(); }
+    const tabs = [{ key: 'all', label: 'All' }].concat(SHOP_KINDS.filter(k => k.key !== 'premium'))
+      .concat(premiumItem ? [{ key: 'premium', label: 'Premium' }] : [])
+      .map(k => `<button class="doi-shop-tab ${cat === k.key ? 'active' : ''}" data-shop-cat="${k.key}">${esc(k.label)}</button>`).join('');
+
+    // Which items to show for the active category.
+    let visible = cat === 'all' ? items.filter(i => i.kind !== 'premium')
+                : items.filter(i => i.kind === cat);
+
+    let bodyGrids;
+    if (cat === 'all') {
+      bodyGrids = SHOP_KINDS.filter(k => k.key !== 'premium').map(k => {
+        const list = items.filter(i => i.kind === k.key);
+        if (!list.length) return '';
+        return `<section class="doi-shop-cat">
+          <div class="doi-shop-cat-head"><h2>${k.label}</h2><button class="doi-shop-seeall" data-shop-cat="${k.key}">See all →</button></div>
+          <div class="doi-shop-grid">${list.map(i => shopCard(i, me, isOwner)).join('')}</div></section>`;
+      }).join('');
+    } else if (cat === 'premium') {
+      bodyGrids = premiumItem
+        ? `<div class="doi-shop-grid">${shopCard(premiumItem, me, isOwner)}</div>`
+        : '<div class="doi-empty" style="padding:24px 0;color:var(--doi-ink-4)">Premium isn\'t listed right now.</div>';
+    } else {
+      bodyGrids = visible.length
+        ? `<div class="doi-shop-grid">${visible.map(i => shopCard(i, me, isOwner)).join('')}</div>`
+        : '<div class="doi-empty" style="padding:24px 0;color:var(--doi-ink-4)">Nothing here yet.</div>';
+    }
+
+    const claimReady = (me.claimIn || 0) <= 0;
+    const claimBtn = `<button class="doi-shop-claim ${claimReady ? 'ready' : ''}" data-shop-claim ${claimReady ? '' : 'disabled'}>
+        ${claimReady ? `Claim +${me.claimAmount || 20}` : `Claim in ${fmtDuration(me.claimIn || 0)}`}
+      </button>`;
+
+    const head = `
+      <span class="doi-hash"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/></svg></span>
+      <h2>Shop</h2>
+      <div class="doi-shop-head-right">
+        <div class="doi-token-pill" title="Your token balance">${tokenSVG}<b>${me.tokens != null ? me.tokens : 0}</b><span>Tokens</span></div>
+        ${claimBtn}
+      </div>`;
+
+    const body = `<div class="doi-main-body doi-shop-scroll">
+      <div class="doi-shop">
+        <div class="doi-shop-tabs">${tabs}</div>
+        <div class="doi-shop-hero" style="background:${hero.grad}">
+          <span class="doi-bubbles-scoped" aria-hidden="true">${scopedBubbles(14)}</span>
+          <div class="doi-shop-hero-inner">
+            <p class="doi-shop-eyebrow">Novalis Shop</p>
+            <h1>${hero.title}</h1>
+            <p class="doi-shop-hero-sub">Spend tokens on decorations, frames, effects &amp; nameplates. Earn <b>+${me.claimAmount || 20}</b> tokens every 18h — claim above.</p>
+          </div>
+        </div>
+        ${isOwner ? `
+          <details class="doi-shop-manage" ${items.length ? '' : 'open'}>
+            <summary>⚙ Owner tools — add or remove items</summary>
+            <div class="doi-shop-form">
+              <input id="shopName" placeholder="Item name"/>
+              <select id="shopKind">${SHOP_KINDS.map(k => `<option value="${k.key}">${k.label}</option>`).join('')}</select>
+              <input id="shopPrice" type="number" min="0" step="1" placeholder="Price (tokens)"/>
+              <input id="shopImage" placeholder="Image URL (png/webp)"/>
+              <button class="doi-shop-buy" id="shopAdd">Add item</button>
+            </div>
+            <input id="shopDesc" placeholder="Short description (optional)" style="margin-top:8px;width:100%"/>
+            <p class="doi-shop-manage-hint">Removing an item also unequips it for everyone. Prices are in tokens.</p>
+          </details>` : ''}
+        ${bodyGrids || '<div class="doi-empty" style="padding:24px 0;color:var(--doi-ink-4)">No items yet.</div>'}
+      </div>
+    </div>`;
+    return `<div class="doi-main-head">${head}</div>${body}`;
+  }
+
+  function wireShopPage(container) {
+    const modal = container; // events are scoped to the main content
+    async function refresh(prof) {
+      if (prof) cache.profile = prof;
+      try { cache.shop = await api.shop(); } catch (_) {}
+      rerenderMainSoft(); applyTheme(); mountBubbles();
+    }
+    $$('[data-shop-cat]', modal).forEach(b => b.addEventListener('click', () => {
+      state.shopCat = b.dataset.shopCat;
+      state.shopTab = b.dataset.shopCat === 'premium' ? 'premium' : 'all';
+      rerenderShell();
+    }));
+    $$('[data-shop-claim]', modal).forEach(b => b.addEventListener('click', async () => {
+      b.disabled = true;
+      try { const rr = await api.shopClaim(); toast(`+${rr.gained} tokens claimed`); await refresh(rr.profile); }
+      catch (e) { toast(e.message === 'Not ready yet' ? 'Not ready yet — check back later' : e.message); b.disabled = false; }
+    }));
     $$('[data-buy]', modal).forEach(b => b.addEventListener('click', async () => {
-      b.disabled = true; b.textContent = '…';
+      const t = b.textContent; b.disabled = true; b.textContent = '…';
       try { const rr = await api.shopBuy(b.dataset.buy); toast('Purchased'); await refresh(rr.profile); }
-      catch (e) { alert('Buy failed: ' + e.message); }
+      catch (e) { toast(e.message === 'Not enough tokens' ? 'Not enough tokens' : ('Buy failed: ' + e.message)); b.disabled = false; b.textContent = t; }
     }));
     $$('[data-equip]', modal).forEach(b => b.addEventListener('click', async () => {
       try { const rr = await api.shopEquip({ id: b.dataset.equip }); toast('Equipped'); await refresh(rr.profile); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     }));
     $$('[data-unequip]', modal).forEach(b => b.addEventListener('click', async () => {
       try { const rr = await api.shopEquip({ unequip: true, slot: b.dataset.unequip }); toast('Unequipped'); await refresh(rr.profile); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     }));
-    if (isOwner) {
-      $$('[data-del]', modal).forEach(b => b.addEventListener('click', async () => {
-        if (!confirm('Remove this item from the shop?')) return;
-        try { await api.shopAdmin({ action: 'remove', id: b.dataset.del }); await refresh(); }
-        catch (e) { alert(e.message); }
-      }));
-      modal.querySelector('#shopAdd')?.addEventListener('click', async () => {
-        const name = modal.querySelector('#shopName').value.trim();
-        if (!name) return alert('Name required');
-        const patch = {
-          action: 'add', name,
-          kind: modal.querySelector('#shopKind').value,
-          price: parseFloat(modal.querySelector('#shopPrice').value) || 0,
-          image: modal.querySelector('#shopImage').value.trim(),
-          desc: modal.querySelector('#shopDesc').value.trim(),
-        };
-        try { await api.shopAdmin(patch); toast('Item added'); await refresh(); }
-        catch (e) { alert(e.message); }
-      });
-    }
+    $$('[data-del]', modal).forEach(b => b.addEventListener('click', async () => {
+      if (!confirm('Remove this item from the shop?')) return;
+      try { await api.shopAdmin({ action: 'remove', id: b.dataset.del }); toast('Removed'); await refresh(); }
+      catch (e) { toast(e.message); }
+    }));
+    const addBtn = modal.querySelector('#shopAdd');
+    if (addBtn) addBtn.addEventListener('click', async () => {
+      const name = modal.querySelector('#shopName').value.trim();
+      if (!name) return toast('Name required');
+      const patch = {
+        action: 'add', name,
+        kind: modal.querySelector('#shopKind').value,
+        price: parseInt(modal.querySelector('#shopPrice').value, 10) || 0,
+        image: modal.querySelector('#shopImage').value.trim(),
+        desc: modal.querySelector('#shopDesc').value.trim(),
+      };
+      try { await api.shopAdmin(patch); toast('Item added'); await refresh(); }
+      catch (e) { toast(e.message); }
+    });
   }
 
   /* ---------- iOS26 BUBBLES ---------- */
@@ -1924,6 +1986,8 @@
   }
 
   function wireMainOnly(container) {
+    // shop page lives in main content
+    if (state.server === 'home' && state.homeView === 'shop') { wireShopPage(container); return; }
     // composer (channel or DM)
     const form = container.querySelector('[data-composer]');
     if (form && !form.dataset.wired) {
@@ -2181,10 +2245,10 @@
       toast(el.dataset.shellSoft + ' — coming soon');
     }));
 
-    // shop / premium
-    $$('[data-shell-shop]', container).forEach(el => el.addEventListener('click', e => {
+    // shop / premium — open the shop as an in-app page (keeps sidebar)
+    $$('[data-shell-shop]', container).forEach(el => el.addEventListener('click', async e => {
       e.stopPropagation();
-      openShop();
+      await openShop(el.dataset.shellShop);
     }));
 
     // group: leave / invite / settings
