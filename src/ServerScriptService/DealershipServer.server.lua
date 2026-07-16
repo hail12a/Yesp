@@ -41,6 +41,13 @@ print("[Dealer] all remotes found, handler will be set up")
 
 local ownStore = DataStoreService:GetDataStore("CarOwnership_v1")
 
+-- optional hook: log car purchases/sales into NovalOS banking transactions
+local bankLog = ReplicatedStorage:FindFirstChild("BankLog")
+local function logBank(userId, desc, cat, amt)
+	if not bankLog then bankLog = ReplicatedStorage:FindFirstChild("BankLog") end
+	if bankLog then bankLog:Fire(userId, { desc = desc, cat = cat, amt = amt }) end
+end
+
 -- in-memory ownership: [userId] = { ["Car Name"] = purchasePrice }
 local owned = {}
 
@@ -252,6 +259,7 @@ requestFn.OnServerInvoke = function(player, action, carName)
 		m.Value = m.Value - buyPrice
 		ownedTbl[buyName] = buyPrice
 		saveOwnership(player)
+		logBank(player.UserId, "Car purchase - " .. buyName, "Auto", -buyPrice)
 		return { ok = true, msg = "Car bought — enjoy your " .. buyName .. "!" }
 
 	elseif action == "sell" then
@@ -264,6 +272,7 @@ requestFn.OnServerInvoke = function(player, action, carName)
 		m.Value = m.Value + refund
 		ownedTbl[carName] = nil
 		saveOwnership(player)
+		logBank(player.UserId, "Car sale - " .. carName, "Auto", refund)
 		return { ok = true, msg = "Sold for $" .. refund .. " (25% loss).", refund = refund }
 	end
 
