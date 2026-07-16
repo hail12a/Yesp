@@ -1134,3 +1134,76 @@ body.doi-theme-insurgency .doi-gate {
     radial-gradient(900px 600px at 50% 120%, rgba(200,16,46,.10), transparent 60%),
     #050505;
 }
+
+/* =========================================================
+   NOVALIS ADDITIONS — accent picker, kill hazard/red-scroll,
+   iOS26 bubbles, Shop.
+   ========================================================= */
+body.doi-home .topbar::after { display: none !important; }
+body.doi-home .topbar { border-bottom: 1px solid var(--doi-border); }
+body.doi-home { background: var(--doi-bg) !important; }
+body.doi-home ::selection { background: var(--doi-accent); color: #fff; }
+body.doi-home * { scrollbar-color: var(--doi-accent) transparent; }
+body.doi-home *::-webkit-scrollbar-thumb { background: var(--doi-accent); border-radius: 6px; }
+
+.doi-accent-swatches { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px; }
+.doi-accent-swatch { width: 30px; height: 30px; border-radius: 50%; cursor: pointer; border: 2px solid rgba(255,255,255,.14); padding: 0; transition: transform .12s var(--doi-ease), box-shadow .12s var(--doi-ease); }
+.doi-accent-swatch:hover { transform: scale(1.12); }
+.doi-accent-swatch.active { box-shadow: 0 0 0 3px var(--doi-panel), 0 0 0 5px currentColor; transform: scale(1.12); }
+.doi-accent-custom { position: relative; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; cursor: pointer; overflow: hidden; border: 2px dashed rgba(255,255,255,.25); background: conic-gradient(from 0deg, #f23f42, #f0b232, #23a55a, #3b7ec1, #7c3aed, #eb459e, #f23f42); }
+.doi-accent-custom span { font-size: 18px; line-height: 1; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.6); pointer-events:none; }
+.doi-accent-custom input[type="color"] { position: absolute; inset: -4px; opacity: 0; cursor: pointer; }
+.doi-btn-ghost { background: transparent; color: var(--doi-ink-3); border: 1px solid rgba(255,255,255,.12); border-radius: 8px; padding: 9px 14px; font-family: var(--sans); font-weight: 600; font-size: 14px; cursor: pointer; transition: all .15s var(--doi-ease); }
+.doi-btn-ghost:hover { color: #fff; border-color: var(--doi-accent); }
+.doi-accent-sitewide { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 13px; color: var(--doi-ink-3); cursor: pointer; }
+.doi-accent-sitewide input { width: 16px; height: 16px; accent-color: var(--doi-accent); }
+
+@keyframes doiBubbleFloat { 0% { transform: translateY(0) scale(1); opacity: 0; } 10% { opacity: .5; } 90% { opacity: .5; } 100% { transform: translateY(-120vh) scale(1.25); opacity: 0; } }
+.doi-bubbles { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+.doi-bubbles b { position: absolute; bottom: -80px; border-radius: 50%; background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.55), var(--doi-accent) 60%, transparent 72%); filter: blur(.5px) saturate(160%); box-shadow: inset 0 0 12px rgba(255,255,255,.35), 0 4px 18px color-mix(in srgb, var(--doi-accent) 40%, transparent); animation: doiBubbleFloat linear infinite; }
+body.doi-no-bubbles .doi-bubbles { display: none; }
+.doi-shell, .doi-gate-inner, .doi-us-shell, .doi-pp-shell { position: relative; z-index: 1; }
+
+.doi-shop { padding: 0 0 60px; }
+.doi-shop-hero { margin: 0 0 8px; padding: 40px 40px 34px; position: relative; overflow: hidden; background: radial-gradient(600px 300px at 12% 0%, color-mix(in srgb, var(--doi-accent) 45%, transparent), transparent 70%), radial-gradient(600px 340px at 88% 120%, color-mix(in srgb, var(--doi-accent-2) 45%, transparent), transparent 65%), linear-gradient(135deg, #2a2140, #1a1830); }
+.doi-shop-hero h1 { font-size: 44px; font-weight: 800; letter-spacing: -.02em; margin: 0; color: #fff; }
+.doi-shop-hero p { margin: 8px 0 0; color: var(--doi-ink-2); font-size: 15px; max-width: 560px; }
+.doi-shop-eyebrow { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: color-mix(in srgb, var(--doi-accent) 70%, #fff); font-weight: 700; margin: 0 0 10px; }
+.doi-shop-body { padding: 24px 40px 0; }
+.doi-shop-cat { margin: 0 0 34px; }
+.doi-shop-cat-head { display: flex; align-items: center; justify-content: space-between; margin: 0 0 14px; }
+.doi-shop-cat-head h2 { font-size: 20px; font-weight: 700; color: var(--doi-ink); margin: 0; }
+.doi-shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+.doi-shop-card { background: var(--doi-panel); border: 1px solid var(--doi-border); border-radius: var(--doi-radius); overflow: hidden; display: flex; flex-direction: column; transition: transform .16s var(--doi-ease-out), box-shadow .16s var(--doi-ease-out), border-color .16s var(--doi-ease); animation: doiScaleIn .4s var(--doi-ease-out) both; }
+.doi-shop-card:hover { transform: translateY(-4px); border-color: var(--doi-accent); box-shadow: 0 14px 34px rgba(0,0,0,.4); }
+.doi-shop-preview { height: 150px; display: grid; place-items: center; position: relative; background: radial-gradient(140px 140px at 50% 42%, color-mix(in srgb, var(--doi-accent) 26%, transparent), var(--doi-panel-2) 72%); }
+.doi-shop-preview img { max-width: 82%; max-height: 82%; object-fit: contain; }
+.doi-shop-preview .doi-shop-noimg { opacity: .4; color: var(--doi-ink-3); }
+.doi-shop-deco-ring { width: 92px; height: 92px; border-radius: 50%; position: relative; background: center/cover no-repeat; box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--doi-accent) 55%, transparent); }
+.doi-shop-badge { position: absolute; top: 8px; left: 8px; font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 3px 7px; border-radius: 6px; color: #fff; background: color-mix(in srgb, var(--doi-accent) 82%, #000); }
+.doi-shop-info { padding: 12px 13px 13px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.doi-shop-name { font-size: 15px; font-weight: 700; color: var(--doi-ink); }
+.doi-shop-type { font-size: 11px; color: var(--doi-ink-4); text-transform: uppercase; letter-spacing: .06em; }
+.doi-shop-foot { display: flex; align-items: center; justify-content: space-between; margin-top: auto; gap: 8px; }
+.doi-shop-price { font-weight: 800; color: var(--doi-ink); font-size: 15px; display: flex; align-items: center; gap: 5px; }
+.doi-shop-price svg { color: var(--doi-accent); }
+.doi-shop-buy { background: var(--doi-accent); color: #fff; border: none; border-radius: 8px; padding: 8px 14px; font-family: var(--sans); font-weight: 700; font-size: 13px; cursor: pointer; transition: background .12s ease; }
+.doi-shop-buy:hover { background: var(--doi-accent-2); }
+.doi-shop-buy.owned { background: var(--doi-panel-3); color: var(--doi-ink-3); }
+.doi-shop-buy.equipped { background: var(--doi-green); }
+.doi-shop-admin-row { display: flex; gap: 6px; }
+.doi-shop-del { background: rgba(242,63,66,.14); color: var(--doi-red); border: none; border-radius: 8px; padding: 8px 10px; cursor: pointer; font-weight: 700; }
+.doi-shop-del:hover { background: rgba(242,63,66,.28); }
+.doi-shop-manage { background: var(--doi-panel); border: 1px solid var(--doi-accent); border-radius: var(--doi-radius); padding: 18px 20px; margin: 0 40px 26px; display: grid; gap: 12px; }
+.doi-shop-manage h3 { margin: 0; font-size: 16px; color: var(--doi-ink); }
+.doi-shop-form { display: grid; grid-template-columns: 1.4fr 1fr .7fr 1.6fr auto; gap: 8px; align-items: center; }
+.doi-shop-manage input, .doi-shop-manage select { background: rgba(0,0,0,.3); color: var(--doi-ink); border: 1px solid rgba(255,255,255,.08); border-radius: 8px; padding: 9px 11px; font-family: var(--sans); font-size: 13.5px; outline: none; }
+.doi-shop-manage input:focus, .doi-shop-manage select:focus { border-color: var(--doi-accent); }
+.doi-shop-premium-card { display: flex; align-items: center; gap: 20px; padding: 22px 24px; border-radius: var(--doi-radius); border: 1px solid var(--doi-border); background: linear-gradient(120deg, color-mix(in srgb, var(--doi-accent) 26%, #1e1f22), #1e1f22); margin-bottom: 22px; }
+.doi-shop-premium-card .doi-shop-name { font-size: 20px; }
+.doi-shop-premium-card .doi-shop-badge { position: static; }
+@media (max-width: 720px) { .doi-shop-form { grid-template-columns: 1fr 1fr; } }
+
+/* equipped avatar decoration + nameplate on profile popup */
+.doi-pp-deco { position: absolute; inset: -14%; background: center/contain no-repeat; pointer-events: none; }
+.doi-pp-effect { position: absolute; inset: 0; background: center/cover no-repeat; pointer-events: none; opacity: .9; mix-blend-mode: screen; }

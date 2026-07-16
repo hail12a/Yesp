@@ -13,9 +13,9 @@
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
   const TOKEN_KEY = 'doi.token';
-  const LOGO_URL       = 'assets/img/doi-logo.png?v=20260716a';
-  const HERO_TEAM_URL  = 'assets/img/hero-team.png?v=20260716a';
-  const HERO_GATE_URL  = 'assets/img/hero-gate.png?v=20260716a';
+  const LOGO_URL       = 'assets/img/doi-logo.png?v=20260716b';
+  const HERO_TEAM_URL  = 'assets/img/hero-team.png?v=20260716b';
+  const HERO_GATE_URL  = 'assets/img/hero-gate.png?v=20260716b';
   window.DOI_LOGO_URL = LOGO_URL;
 
   /* ---------- CACHE ---------- */
@@ -71,6 +71,10 @@
     login:    (user, pass) => jfetch('/api/login',    { method: 'POST', body: JSON.stringify({ user, pass }) }),
     me:       () => jfetch('/api/doi/me?token=' + q(cache.token || '')),
     saveProfile: (patch) => jfetch('/api/doi/me', { method: 'POST', body: JSON.stringify({ token: cache.token, ...patch }) }),
+    shop:      () => jfetch('/api/doi/shop?token=' + q(cache.token || '')),
+    shopAdmin: (patch) => jfetch('/api/doi/shop/admin', { method: 'POST', body: JSON.stringify({ token: cache.token, ...patch }) }),
+    shopBuy:   (id) => jfetch('/api/doi/shop/buy',   { method: 'POST', body: JSON.stringify({ token: cache.token, id }) }),
+    shopEquip: (patch) => jfetch('/api/doi/shop/equip', { method: 'POST', body: JSON.stringify({ token: cache.token, ...patch }) }),
 
     servers:      () => jfetch('/api/doi/servers?token=' + q(cache.token || '')),
     server:       (id) => jfetch('/api/doi/servers/' + q(id) + '?token=' + q(cache.token || '')),
@@ -156,10 +160,40 @@
   function isDOI() { return isAuthed() && cache.profile.name === 'DOI'; }
   window.DOI_IS_DOI = isDOI;
 
+  // darken a #rrggbb hex by `amt` (0..1) for the accent-2 / hover shade
+  function shade(hex, amt) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
+    if (!m) return hex;
+    let n = parseInt(m[1], 16);
+    let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    r = Math.max(0, Math.min(255, Math.round(r * (1 - amt))));
+    g = Math.max(0, Math.min(255, Math.round(g * (1 - amt))));
+    b = Math.max(0, Math.min(255, Math.round(b * (1 - amt))));
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+  }
+
   function applyTheme() {
     // Non-owners are always Discord-dark. Owner can pick Insurgency.
     const wantIns = isDOI() && cache.profile && cache.profile.theme === 'insurgency';
     document.body.classList.toggle('doi-theme-insurgency', !!wantIns);
+    if (typeof window.__doiMountBubbles === 'function') window.__doiMountBubbles();
+    const root = document.documentElement;
+    if (wantIns) {
+      // Insurgency theme keeps its own red accent (from CSS); just make the
+      // global scrollbar/selection follow it too.
+      root.style.removeProperty('--doi-accent');
+      root.style.removeProperty('--doi-accent-2');
+      root.style.setProperty('--accent', '#c8102e');
+      root.style.setProperty('--accent-ink', '#c8102e');
+      return;
+    }
+    // Per-user accent (falls back to owner-set site default → blurple-blue).
+    const accent = (cache.profile && cache.profile.accent) || '#5865f2';
+    root.style.setProperty('--doi-accent', accent);
+    root.style.setProperty('--doi-accent-2', shade(accent, 0.18));
+    // Override the docs-site red that drives global scrollbar + ::selection.
+    root.style.setProperty('--accent', accent);
+    root.style.setProperty('--accent-ink', accent);
   }
 
   /* ---------- LOGIN GATE ---------- */
@@ -171,7 +205,7 @@
       <div class="doi-gate-inner">
         <div class="doi-gate-badge"><img src="${LOGO_URL}" alt="DOI"/></div>
         <h1>${mode==='login' ? 'Welcome back!' : 'Create an account'}</h1>
-        <p class="doi-motto">${mode==='login' ? "We're so excited to see you again." : 'Join the Department of Insurgency network.'}</p>
+        <p class="doi-motto">${mode==='login' ? "We're so excited to see you again." : 'Join the Novalis network.'}</p>
         <div class="doi-tabs" role="tablist">
           <button data-mode="login" class="${mode==='login'?'active':''}">Sign In</button>
           <button data-mode="register" class="${mode==='register'?'active':''}">Register</button>
@@ -193,7 +227,7 @@
             ${mode==='login' ? 'Log In' : 'Continue'}
           </button>
         </form>
-        <div class="doi-gate-foot">Department of Insurgency · same-origin server</div>
+        <div class="doi-gate-foot">Novalis · same-origin server</div>
       </div>`;
     $$('.doi-tabs button', gate).forEach(b => b.addEventListener('click', () => renderGate(b.dataset.mode)));
     $('#doiGateForm', gate).addEventListener('submit', async e => {
@@ -212,7 +246,7 @@
         cache.profile = me.profile;
         applyTheme();
         // fetch initial data before rendering the shell
-        await Promise.all([loadServers(), loadFriends(), loadFriendRequests(), loadDMs()]);
+        await Promise.all([loadServers(), loadFriends(), loadFriendRequests(), loadDMs(), preloadShop()]);
         gate.hidden = true;
         if (typeof window.__doiRender === 'function') window.__doiRender();
         window.dispatchEvent(new CustomEvent('doi:auth'));
@@ -436,11 +470,11 @@
               <span>Friends</span>
               ${reqCount ? `<span class="doi-badge-count">${reqCount}</span>` : ''}
             </div>
-            <div class="doi-home-nav doi-home-nav-soft" data-shell-soft="Nitro">
+            <div class="doi-home-nav doi-home-nav-soft" data-shell-shop="1">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.5 7.5H22l-6 4.5 2.5 7.5L12 17l-6.5 4.5L8 14l-6-4.5h7.5z"/></svg>
-              <span>Nitro</span>
+              <span>Premium</span>
             </div>
-            <div class="doi-home-nav doi-home-nav-soft" data-shell-soft="Shop">
+            <div class="doi-home-nav doi-home-nav-soft" data-shell-shop="1">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/></svg>
               <span>Shop</span>
             </div>
@@ -901,7 +935,9 @@
 
       <div class="doi-modal" id="doiNewConvoModal" hidden><div class="doi-modal-inner"></div></div>
 
-      <div class="doi-modal doi-modal-full" id="doiUserSettings" hidden></div>`;
+      <div class="doi-modal doi-modal-full" id="doiUserSettings" hidden></div>
+
+      <div class="doi-modal doi-modal-full" id="doiShopModal" hidden></div>`;
   }
 
   async function openDM(otherKey) {
@@ -979,13 +1015,19 @@
           : `<button class="doi-pp-btn doi-btn-primary" data-pp-add="${esc(prof.name)}">Send Friend Request</button>`}`;
     const isSelf = friendState === 'self';
     const bioText = prof.bio || (isSelf ? 'Click here to add a bio…' : '');
+    const deco   = equippedAsset(prof, 'decoration');
+    const effect = equippedAsset(prof, 'effect');
+    const frame  = equippedAsset(prof, 'frame');
     inner.innerHTML = `
       <button class="doi-pp-close" data-close-modal title="Close">×</button>
       <div class="doi-pp-shell">
         <div class="doi-pp-col">
           <div class="doi-pp">
+            ${effect ? `<span class="doi-pp-effect" style="background-image:url('${esc(effect)}')"></span>` : ''}
+            ${frame  ? `<span class="doi-pp-effect" style="background-image:url('${esc(frame)}');mix-blend-mode:normal;background-size:contain"></span>` : ''}
             <div class="doi-pp-banner ${isSelf?'editable':''}" data-pp-editbanner style="background:${esc(prof.bannerColor)}"></div>
-            <div class="doi-pp-avatarwrap">${avatarHTML(prof.name, prof.avatar, 96)}
+            <div class="doi-pp-avatarwrap" style="position:relative">${avatarHTML(prof.name, prof.avatar, 96)}
+              ${deco ? `<span class="doi-pp-deco" style="background-image:url('${esc(deco)}')"></span>` : ''}
               <span class="doi-pp-online"></span>
             </div>
             <div class="doi-pp-body">
@@ -1268,6 +1310,195 @@
     });
   }
 
+  /* ---------- SHOP ---------- */
+  const SHOP_KINDS = [
+    { key: 'premium',    label: 'Premium' },
+    { key: 'decoration', label: 'Avatar Decorations' },
+    { key: 'frame',      label: 'Profile Frames' },
+    { key: 'effect',     label: 'Profile Effects' },
+    { key: 'nameplate',  label: 'Nameplates' },
+  ];
+  const orbSVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M16.23 12c0 1.29-.95 2.25-2.22 2.25A2.18 2.18 0 0 1 11.8 12c0-1.29.95-2.25 2.22-2.25 1.27 0 2.22.96 2.22 2.25ZM23 12c0 5.01-4 9-8.99 9a8.93 8.93 0 0 1-8.75-6.9H3.34l-.9-4.2H5.3c.26-.96.68-1.89 1.21-2.7H1.89L1 3h12.74C19.13 3 23 6.99 23 12Z"/></svg>';
+
+  async function openShop() {
+    const modal = document.getElementById('doiShopModal');
+    if (!modal) return;
+    modal.hidden = false;
+    modal.innerHTML = `<div class="doi-shop"><div class="doi-shop-hero"><p class="doi-shop-eyebrow">Novalis Shop</p><h1>Loading…</h1></div></div>
+      <button class="doi-us-close" data-close-modal title="Close (ESC)">×</button>`;
+    modal.querySelector('[data-close-modal]').addEventListener('click', () => modal.hidden = true);
+    try {
+      const r = await api.shop();
+      cache.shop = r;
+      renderShop(r);
+    } catch (e) {
+      modal.querySelector('h1').textContent = 'Shop unavailable';
+    }
+  }
+
+  function shopCard(item, me, isOwner) {
+    const owned = (me.owned || []).includes(item.id);
+    const eqSlot = item.kind;
+    const equipped = me.equipped && me.equipped[eqSlot] === item.id;
+    let preview;
+    if (item.kind === 'decoration') {
+      preview = item.image
+        ? `<div class="doi-shop-deco-ring" style="background-image:url('${esc(item.image)}')"></div>`
+        : `<div class="doi-shop-deco-ring"></div>`;
+    } else {
+      preview = item.image
+        ? `<img src="${esc(item.image)}" alt=""/>`
+        : `<div class="doi-shop-noimg">${orbSVG.replace('16','48').replace('16','48')}</div>`;
+    }
+    let action;
+    if (item.kind === 'premium') {
+      action = me.premium
+        ? `<button class="doi-shop-buy owned" disabled>Owned</button>`
+        : `<button class="doi-shop-buy" data-buy="${item.id}">Get Premium</button>`;
+    } else if (equipped) {
+      action = `<button class="doi-shop-buy equipped" data-unequip="${eqSlot}">Equipped ✓</button>`;
+    } else if (owned) {
+      action = `<button class="doi-shop-buy" data-equip="${item.id}">Equip</button>`;
+    } else {
+      action = `<button class="doi-shop-buy" data-buy="${item.id}">Buy</button>`;
+    }
+    return `
+      <div class="doi-shop-card">
+        <div class="doi-shop-preview"><span class="doi-shop-badge">${esc(kindLabel(item.kind))}</span>${preview}</div>
+        <div class="doi-shop-info">
+          <div class="doi-shop-name">${esc(item.name)}</div>
+          <div class="doi-shop-type">${esc(item.desc || '')}</div>
+          <div class="doi-shop-foot">
+            <div class="doi-shop-price">${orbSVG}${item.price ? item.price.toFixed(2) : 'Free'}</div>
+            <div class="doi-shop-admin-row">
+              ${action}
+              ${isOwner ? `<button class="doi-shop-del" data-del="${item.id}" title="Remove">✕</button>` : ''}
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+  function kindLabel(k) { return (SHOP_KINDS.find(x => x.key === k) || {}).label || k; }
+
+  function renderShop(r) {
+    const modal = document.getElementById('doiShopModal');
+    if (!modal) return;
+    const me = r.me, items = r.items || [], isOwner = r.isOwner;
+    const premiumItem = items.find(i => i.kind === 'premium');
+    const cats = SHOP_KINDS.filter(k => k.key !== 'premium').map(k => {
+      const list = items.filter(i => i.kind === k.key);
+      if (!list.length) return '';
+      return `<section class="doi-shop-cat"><div class="doi-shop-cat-head"><h2>${k.label}</h2></div>
+        <div class="doi-shop-grid">${list.map(i => shopCard(i, me, isOwner)).join('')}</div></section>`;
+    }).join('');
+    modal.innerHTML = `
+      <div class="doi-shop">
+        <div class="doi-shop-hero">
+          <p class="doi-shop-eyebrow">Novalis Shop</p>
+          <h1>Make it yours</h1>
+          <p>Avatar decorations, profile frames, animated effects and nameplates. ${isOwner ? 'You own this shop — add or remove anything below.' : 'Owned items can be equipped from your profile.'}</p>
+        </div>
+        <div class="doi-shop-body">
+          ${isOwner ? `
+            <div class="doi-shop-manage">
+              <h3>Manage shop (owner)</h3>
+              <div class="doi-shop-form">
+                <input id="shopName" placeholder="Item name"/>
+                <select id="shopKind">
+                  ${SHOP_KINDS.map(k => `<option value="${k.key}">${k.label}</option>`).join('')}
+                </select>
+                <input id="shopPrice" type="number" min="0" step="0.01" placeholder="Price"/>
+                <input id="shopImage" placeholder="Image URL (png/webp)"/>
+                <button class="doi-shop-buy" id="shopAdd">Add item</button>
+              </div>
+              <input id="shopDesc" placeholder="Short description (optional)"/>
+            </div>` : ''}
+          ${premiumItem ? `
+            <div class="doi-shop-premium-card">
+              <span class="doi-shop-badge">Premium</span>
+              <div style="flex:1">
+                <div class="doi-shop-name">${esc(premiumItem.name)}</div>
+                <div class="doi-shop-type">${esc(premiumItem.desc || 'Unlock custom accent, bubble effects, and profile flair.')}</div>
+              </div>
+              <div class="doi-shop-price">${orbSVG}${premiumItem.price ? premiumItem.price.toFixed(2) : 'Free'}</div>
+              ${me.premium ? `<button class="doi-shop-buy owned" disabled>Owned</button>` : `<button class="doi-shop-buy" data-buy="${premiumItem.id}">Get Premium</button>`}
+              ${isOwner ? `<button class="doi-shop-del" data-del="${premiumItem.id}" title="Remove">✕</button>` : ''}
+            </div>` : ''}
+          ${cats || '<div class="doi-empty" style="padding:20px 0;color:var(--doi-ink-4)">No items yet.</div>'}
+        </div>
+      </div>
+      <button class="doi-us-close" data-close-modal title="Close (ESC)">×</button>`;
+    modal.querySelector('[data-close-modal]').addEventListener('click', () => modal.hidden = true);
+
+    async function refresh(prof) { if (prof) cache.profile = prof; const rr = await api.shop(); cache.shop = rr; renderShop(rr); applyTheme(); mountBubbles(); }
+    $$('[data-buy]', modal).forEach(b => b.addEventListener('click', async () => {
+      b.disabled = true; b.textContent = '…';
+      try { const rr = await api.shopBuy(b.dataset.buy); toast('Purchased'); await refresh(rr.profile); }
+      catch (e) { alert('Buy failed: ' + e.message); }
+    }));
+    $$('[data-equip]', modal).forEach(b => b.addEventListener('click', async () => {
+      try { const rr = await api.shopEquip({ id: b.dataset.equip }); toast('Equipped'); await refresh(rr.profile); }
+      catch (e) { alert(e.message); }
+    }));
+    $$('[data-unequip]', modal).forEach(b => b.addEventListener('click', async () => {
+      try { const rr = await api.shopEquip({ unequip: true, slot: b.dataset.unequip }); toast('Unequipped'); await refresh(rr.profile); }
+      catch (e) { alert(e.message); }
+    }));
+    if (isOwner) {
+      $$('[data-del]', modal).forEach(b => b.addEventListener('click', async () => {
+        if (!confirm('Remove this item from the shop?')) return;
+        try { await api.shopAdmin({ action: 'remove', id: b.dataset.del }); await refresh(); }
+        catch (e) { alert(e.message); }
+      }));
+      modal.querySelector('#shopAdd')?.addEventListener('click', async () => {
+        const name = modal.querySelector('#shopName').value.trim();
+        if (!name) return alert('Name required');
+        const patch = {
+          action: 'add', name,
+          kind: modal.querySelector('#shopKind').value,
+          price: parseFloat(modal.querySelector('#shopPrice').value) || 0,
+          image: modal.querySelector('#shopImage').value.trim(),
+          desc: modal.querySelector('#shopDesc').value.trim(),
+        };
+        try { await api.shopAdmin(patch); toast('Item added'); await refresh(); }
+        catch (e) { alert(e.message); }
+      });
+    }
+  }
+
+  /* ---------- iOS26 BUBBLES ---------- */
+  function mountBubbles() {
+    let host = document.getElementById('doiBubbles');
+    const on = !cache.profile || cache.profile.bubbles !== false;
+    document.body.classList.toggle('doi-no-bubbles', !on);
+    if (!on) { if (host) host.remove(); return; }
+    if (host) return; // already mounted
+    host = document.createElement('div');
+    host.className = 'doi-bubbles'; host.id = 'doiBubbles'; host.setAttribute('aria-hidden', 'true');
+    let html = '';
+    for (let i = 0; i < 14; i++) {
+      const size = 14 + (i * 7) % 46;
+      const left = (i * 53) % 100;
+      const dur = 14 + (i * 3) % 16;
+      const delay = (i * 1.7) % 14;
+      html += `<b style="width:${size}px;height:${size}px;left:${left}%;animation-duration:${dur}s;animation-delay:-${delay}s"></b>`;
+    }
+    host.innerHTML = html;
+    document.body.appendChild(host);
+  }
+  window.__doiMountBubbles = mountBubbles;
+
+  // Resolve an equipped item's image (global shop catalog) for a profile.
+  function equippedAsset(prof, kind) {
+    const id = prof && prof.equipped && prof.equipped[kind];
+    if (!id || !cache.shop || !cache.shop.items) return null;
+    const it = cache.shop.items.find(i => i.id === id);
+    return (it && it.image) ? it.image : null;
+  }
+  async function preloadShop() {
+    try { cache.shop = await api.shop(); } catch (_) {}
+  }
+
   /* ---------- SETTINGS MODAL ---------- */
   function openSettings(section = 'account') {
     const modal = document.getElementById('doiUserSettings');
@@ -1381,14 +1612,42 @@
             <div class="doi-us-val">Discord Dark</div>
             <div class="doi-us-hint">Alternate themes are owner-only.</div>
           </div>
-        `}`;
+        `}
+        <div class="doi-us-field">
+          <label>Accent Color</label>
+          <div class="doi-accent-swatches">
+            ${['#5865f2','#7c3aed','#eb459e','#c8102e','#f0883e','#d4af37','#23a55a','#14b8a6','#3b7ec1']
+              .map(c => `<button type="button" class="doi-accent-swatch ${(p.accent||'#5865f2').toLowerCase()===c?'active':''}" data-accent="${c}" style="background:${c}" title="${c}"></button>`).join('')}
+            <label class="doi-accent-custom" title="Custom color">
+              <input type="color" id="doiUSAccent" value="${esc((p.accent||'#5865f2'))}"/>
+              <span>+</span>
+            </label>
+          </div>
+          <div class="doi-us-hint">Recolors buttons, highlights, the scrollbar and text selection. Saved to your account.</div>
+          <div class="doi-us-actions" style="margin-top:10px">
+            <button type="button" class="doi-btn-primary" id="doiUSAccentSave">Save Accent</button>
+            <button type="button" class="doi-btn-ghost" id="doiUSAccentReset">Reset to Default</button>
+          </div>
+          ${owner ? `
+          <label class="doi-accent-sitewide">
+            <input type="checkbox" id="doiUSSiteAccent" ${(p.siteAccent && p.siteAccent===p.accent)?'checked':''}/>
+            <span>Also set this accent as the default for all users</span>
+          </label>` : ''}
+        </div>
+        <div class="doi-us-field">
+          <label>iOS-26 Bubble Effects</label>
+          <label class="doi-accent-sitewide">
+            <input type="checkbox" id="doiUSBubbles" ${p.bubbles!==false?'checked':''}/>
+            <span>Animated liquid-glass bubbles floating in the background</span>
+          </label>
+          <div class="doi-us-hint">Turn off if you prefer a still background. Saved to your account.</div>
+        </div>`;
     } else {
       body = `
-        <h2>About DOI</h2>
-        <p style="color:#c0c0c0"><b>Department of Insurgency</b> — Site-CI Terminal</p>
+        <h2>About Novalis</h2>
+        <p style="color:#c0c0c0"><b>Novalis</b> — Site Terminal</p>
         <p style="color:#a0a0a0;font-size:13px">Server: same-origin Node process on Sparkedhost.</p>
-        <p style="color:#a0a0a0;font-size:13px">Client build: 20260716a</p>
-        <p style="color:#a0a0a0;font-size:13px">Motto: Dismantling Greed</p>`;
+        <p style="color:#a0a0a0;font-size:13px">Client build: 20260716b</p>`;
     }
     modal.innerHTML = `
       <div class="doi-us-shell">
@@ -1420,6 +1679,42 @@
         renderSettings('appearance');
       } catch (e) { alert('Save failed: ' + e.message); }
     }));
+    // accent color: live preview on pick, persist on Save
+    if (section === 'appearance') {
+      const colorInput = modal.querySelector('#doiUSAccent');
+      const preview = (hex) => {
+        if (cache.profile) cache.profile.accent = hex;
+        applyTheme();
+        $$('.doi-accent-swatch', modal).forEach(s =>
+          s.classList.toggle('active', s.dataset.accent.toLowerCase() === hex.toLowerCase()));
+      };
+      $$('.doi-accent-swatch', modal).forEach(sw =>
+        sw.addEventListener('click', () => { if (colorInput) colorInput.value = sw.dataset.accent; preview(sw.dataset.accent); }));
+      if (colorInput) colorInput.addEventListener('input', () => preview(colorInput.value));
+      modal.querySelector('#doiUSAccentSave')?.addEventListener('click', async () => {
+        const hex = (colorInput && colorInput.value) || '#5865f2';
+        const patch = { accent: hex };
+        const site = modal.querySelector('#doiUSSiteAccent');
+        if (site) patch.siteAccent = site.checked ? hex : '';
+        try {
+          const r = await api.saveProfile(patch);
+          cache.profile = r.profile; applyTheme();
+          toast(site && site.checked ? 'Accent saved — pushed to all users' : 'Accent saved');
+        } catch (e) { alert('Save failed: ' + e.message); }
+      });
+      modal.querySelector('#doiUSAccentReset')?.addEventListener('click', async () => {
+        try {
+          const r = await api.saveProfile({ accentReset: true });
+          cache.profile = r.profile; applyTheme(); renderSettings('appearance');
+        } catch (e) { alert('Reset failed: ' + e.message); }
+      });
+      modal.querySelector('#doiUSBubbles')?.addEventListener('change', async (e) => {
+        try {
+          const r = await api.saveProfile({ bubbles: e.target.checked });
+          cache.profile = r.profile; mountBubbles();
+        } catch (err) { alert('Save failed: ' + err.message); }
+      });
+    }
     // Section wiring
     if (section === 'account') {
       modal.querySelector('[data-us-signout]')?.addEventListener('click', () => {
@@ -1863,6 +2158,12 @@
       toast(el.dataset.shellSoft + ' — coming soon');
     }));
 
+    // shop / premium
+    $$('[data-shell-shop]', container).forEach(el => el.addEventListener('click', e => {
+      e.stopPropagation();
+      openShop();
+    }));
+
     // group: leave / invite / settings
     $$('[data-group-leave]', container).forEach(b => b.addEventListener('click', async e => {
       e.stopPropagation();
@@ -2091,7 +2392,7 @@
       cache.profile = r.profile;
       applyTheme();
       // preload core data once, then let render happen
-      await Promise.all([loadServers(), loadFriends(), loadFriendRequests(), loadDMs()]);
+      await Promise.all([loadServers(), loadFriends(), loadFriendRequests(), loadDMs(), preloadShop()]);
       // pre-select flagship server → first channel so users land in something usable
       if (state.server === 'home' && cache.servers && cache.servers.length) {
         // stay on home; user sees Friends first (Discord-like)

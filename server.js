@@ -145,7 +145,7 @@ const WORLD_TTL = 15000;
 
 /* ---- DOI network (servers, channels, chat, friends, DMs, profiles) ---- */
 const DOI_FILE = path.join(__dirname, "doi.json");
-let doiStore = { servers: {}, friends: {}, friendReqs: {}, dms: {}, profiles: {}, hiddenDMs: {}, groups: {} };
+let doiStore = { servers: {}, friends: {}, friendReqs: {}, dms: {}, profiles: {}, hiddenDMs: {}, groups: {}, siteAccent: "", shop: null };
 try {
   const loaded = JSON.parse(fs.readFileSync(DOI_FILE, "utf8"));
   if (loaded && typeof loaded === "object") {
@@ -156,6 +156,8 @@ try {
     doiStore.profiles   = (loaded.profiles   && typeof loaded.profiles   === "object") ? loaded.profiles   : {};
     doiStore.hiddenDMs  = (loaded.hiddenDMs  && typeof loaded.hiddenDMs  === "object") ? loaded.hiddenDMs  : {};
     doiStore.groups     = (loaded.groups     && typeof loaded.groups     === "object") ? loaded.groups     : {};
+    doiStore.siteAccent = (typeof loaded.siteAccent === "string") ? loaded.siteAccent : "";
+    doiStore.shop       = (loaded.shop && Array.isArray(loaded.shop.items)) ? loaded.shop : null;
   }
 } catch (_) {}
 
@@ -166,7 +168,7 @@ if (!doiStore.servers[DOI_FLAGSHIP_ID]) {
   doiStore.servers[DOI_FLAGSHIP_ID] = {
     id: DOI_FLAGSHIP_ID,
     name: "DOI · Site-CI",
-    description: "The flagship Department of Insurgency server. Owner: DOI.",
+    description: "The flagship Novalis server. Owner: DOI.",
     ownerKey: "doi",
     icon: null,
     created: Date.now(),
@@ -189,6 +191,18 @@ if (!doiStore.servers[DOI_FLAGSHIP_ID]) {
       "ch-blackline":[{ id:"m1", author:"DOI", ts: 1704067200000, text:"BLACKLINE — restricted channel." }]
     }
   };
+}
+
+// Seed a starter shop on first boot. Items are owner-editable at runtime.
+// kind: "premium" | "decoration" | "nameplate" | "effect" | "frame"
+if (!doiStore.shop) {
+  doiStore.shop = { items: [
+    { id: "sku-premium",   kind: "premium",    name: "Novalis Premium", price: 9.99, image: "", desc: "Custom accent, bubble effects, profile flair." },
+    { id: "sku-bonsai",    kind: "effect",     name: "Bonsai Eternity", price: 4.99, image: "", desc: "Drifting pink bonsai leaves across your profile." },
+    { id: "sku-dreamhop",  kind: "nameplate",  name: "Dream Hop",       price: 3.99, image: "", desc: "A winged bunny hops behind your name." },
+    { id: "sku-crystals",  kind: "frame",      name: "Crystals",        price: 4.99, image: "", desc: "Purple crystal clusters crown your avatar." },
+    { id: "sku-chillet",   kind: "decoration", name: "Chillet",         price: 8.99, image: "", desc: "A frosty companion hugs your avatar." }
+  ] };
 }
 
 let doiSaveTimer = null;
@@ -223,6 +237,12 @@ function doiProfile(key) {
     bannerColor: p.bannerColor || defaultBanner(key),
     messagePrivacy: p.messagePrivacy || "anyone",   // "anyone" | "friends"
     theme: p.theme || "discord",                    // "discord" | "insurgency" (owner-only meaningful)
+    accent: p.accent || doiStore.siteAccent || "#5865f2",  // per-user accent; falls back to owner-set site default
+    siteAccent: doiStore.siteAccent || "",          // owner-pushed default (for the Appearance toggle state)
+    bubbles: p.bubbles !== false,                   // iOS26 bubble effects on by default
+    premium: !!p.premium,                           // has Novalis Premium
+    owned: Array.isArray(p.owned) ? p.owned : [],   // owned shop item ids
+    equipped: (p.equipped && typeof p.equipped === "object") ? p.equipped : {},  // {decoration,effect,nameplate,frame} -> itemId
     joined: (rec && rec.created) || Date.now(),
     isDOI: !!(rec && rec.user === "DOI")
   };
@@ -504,7 +524,74 @@ async function handleApi(req, res, urlPath, query) {
     if (typeof m.bannerColor === "string" && /^#[0-9a-fA-F]{3,8}$/.test(m.bannerColor)) p.bannerColor = m.bannerColor;
     if (m.messagePrivacy === "friends" || m.messagePrivacy === "anyone") p.messagePrivacy = m.messagePrivacy;
     if ((m.theme === "discord" || m.theme === "insurgency") && u.name === "DOI") p.theme = m.theme;
+    if (typeof m.accent === "string" && /^#[0-9a-fA-F]{6}$/.test(m.accent)) p.accent = m.accent;
+    if (typeof m.accentReset !== "undefined" && m.accentReset) delete p.accent;
+    if (typeof m.bubbles === "boolean") p.bubbles = m.bubbles;
+    // Owner can push a site-wide default accent to every user (like the theme toggle).
+    if (u.name === "DOI" && typeof m.siteAccent === "string") {
+      doiStore.siteAccent = /^#[0-9a-fA-F]{6}$/.test(m.siteAccent) ? m.siteAccent : "";
+    }
     if (typeof m.avatar === "string") { if (m.avatar.length < 260_000) p.avatar = m.avatar; }
+    doiStore.profiles[u.key] = p;
+    saveDoi();
+    return sendJSON(res, { ok: true, profile: doiProfile(u.key) });
+  }
+
+  // ---------- SHOP ----------
+  if (urlPath === "/api/doi/shop" && req.method === "GET") {
+    const u = doiUserFromToken(query.get("token") || "");
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    return sendJSON(res, { ok: true, items: doiStore.shop.items, me: doiProfile(u.key), isOwner: u.name === "DOI" });
+  }
+  if (urlPath === "/api/doi/shop/admin" && req.method === "POST") {
+    const m = await readBody(req);
+    const u = doiUserFromToken(m.token);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    if (u.name !== "DOI") return sendJSON(res, { error: "Owner only" }, 403);
+    if (m.action === "add") {
+      const kinds = ["premium", "decoration", "nameplate", "effect", "frame"];
+      const kind = kinds.includes(m.kind) ? m.kind : "decoration";
+      const name = String(m.name || "").trim().slice(0, 40);
+      if (!name) return sendJSON(res, { error: "Name required" }, 400);
+      const price = Math.max(0, Math.min(999, Number(m.price) || 0));
+      const image = (typeof m.image === "string" && m.image.length < 400) ? m.image.trim() : "";
+      const desc  = String(m.desc || "").slice(0, 140);
+      const id = "sku-" + Math.abs(hashCode(name + kind + Date.now())).toString(36);
+      doiStore.shop.items.push({ id, kind, name, price, image, desc });
+    } else if (m.action === "remove") {
+      doiStore.shop.items = doiStore.shop.items.filter(it => it.id !== m.id);
+    }
+    saveDoi();
+    return sendJSON(res, { ok: true, items: doiStore.shop.items });
+  }
+  if (urlPath === "/api/doi/shop/buy" && req.method === "POST") {
+    const m = await readBody(req);
+    const u = doiUserFromToken(m.token);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    const item = doiStore.shop.items.find(it => it.id === m.id);
+    if (!item) return sendJSON(res, { error: "No such item" }, 404);
+    const p = doiStore.profiles[u.key] || {};
+    p.owned = Array.isArray(p.owned) ? p.owned : [];
+    if (!p.owned.includes(item.id)) p.owned.push(item.id);
+    if (item.kind === "premium") p.premium = true;
+    doiStore.profiles[u.key] = p;
+    saveDoi();
+    return sendJSON(res, { ok: true, profile: doiProfile(u.key) });
+  }
+  if (urlPath === "/api/doi/shop/equip" && req.method === "POST") {
+    const m = await readBody(req);
+    const u = doiUserFromToken(m.token);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    const p = doiStore.profiles[u.key] || {};
+    p.owned = Array.isArray(p.owned) ? p.owned : [];
+    p.equipped = (p.equipped && typeof p.equipped === "object") ? p.equipped : {};
+    const item = doiStore.shop.items.find(it => it.id === m.id);
+    if (m.unequip && ["decoration", "nameplate", "effect", "frame"].includes(m.slot)) {
+      delete p.equipped[m.slot];
+    } else if (item && ["decoration", "nameplate", "effect", "frame"].includes(item.kind)) {
+      if (!p.owned.includes(item.id)) return sendJSON(res, { error: "Not owned" }, 400);
+      p.equipped[item.kind] = item.id;
+    }
     doiStore.profiles[u.key] = p;
     saveDoi();
     return sendJSON(res, { ok: true, profile: doiProfile(u.key) });
