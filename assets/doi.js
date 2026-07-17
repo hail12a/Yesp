@@ -91,7 +91,8 @@
     newChannel:    (sid, name, categoryId, topic) => jfetch('/api/doi/servers/' + q(sid) + '/channels', { method: 'POST', body: JSON.stringify({ token: cache.token, name, categoryId, topic }) }),
     deleteChannel: (sid, cid) => jfetch('/api/doi/servers/' + q(sid) + '/channels/' + q(cid) + '/delete', { method: 'POST', body: JSON.stringify({ token: cache.token }) }),
     chat:      (sid, cid, since) => jfetch('/api/doi/servers/' + q(sid) + '/chat/' + q(cid) + '?token=' + q(cache.token || '') + (since ? '&since=' + since : '')),
-    sendChat:  (sid, cid, text)  => jfetch('/api/doi/servers/' + q(sid) + '/chat/' + q(cid), { method: 'POST', body: JSON.stringify({ token: cache.token, text }) }),
+    sendChat:  (sid, cid, text, replyTo)  => jfetch('/api/doi/servers/' + q(sid) + '/chat/' + q(cid), { method: 'POST', body: JSON.stringify({ token: cache.token, text, ...(replyTo ? { replyTo } : {}) }) }),
+    typing:    (target) => jfetch('/api/doi/typing', { method: 'POST', body: JSON.stringify({ token: cache.token, target }) }),
 
     friends:      () => jfetch('/api/doi/friends?token=' + q(cache.token || '')),
     friendRequests: () => jfetch('/api/doi/friends/requests?token=' + q(cache.token || '')),
@@ -102,7 +103,7 @@
 
     dms:            () => jfetch('/api/doi/dms?token=' + q(cache.token || '')),
     dm:  (otherKey, since) => jfetch('/api/doi/dms/' + q(otherKey) + '?token=' + q(cache.token || '') + (since ? '&since=' + since : '')),
-    sendDM: (otherKey, text) => jfetch('/api/doi/dms/' + q(otherKey), { method: 'POST', body: JSON.stringify({ token: cache.token, text }) }),
+    sendDM: (otherKey, text, replyTo) => jfetch('/api/doi/dms/' + q(otherKey), { method: 'POST', body: JSON.stringify({ token: cache.token, text, ...(replyTo ? { replyTo } : {}) }) }),
     closeDM: (otherKey) => jfetch('/api/doi/dms/' + q(otherKey) + '/close', { method: 'POST', body: JSON.stringify({ token: cache.token }) }),
     editChat:  (sid, cid, mid, text) => jfetch('/api/doi/servers/' + q(sid) + '/chat/' + q(cid) + '/edit',   { method: 'POST', body: JSON.stringify({ token: cache.token, mid, text }) }),
     delChat:   (sid, cid, mid)       => jfetch('/api/doi/servers/' + q(sid) + '/chat/' + q(cid) + '/delete', { method: 'POST', body: JSON.stringify({ token: cache.token, mid }) }),
@@ -112,7 +113,7 @@
     createGroup: (name, members) => jfetch('/api/doi/groups', { method: 'POST', body: JSON.stringify({ token: cache.token, name, members }) }),
     group:       (gid) => jfetch('/api/doi/groups/' + q(gid) + '?token=' + q(cache.token || '')),
     groupMsgs:   (gid, since) => jfetch('/api/doi/groups/' + q(gid) + '/messages?token=' + q(cache.token || '') + (since ? '&since=' + since : '')),
-    sendGroup:   (gid, text) => jfetch('/api/doi/groups/' + q(gid) + '/messages', { method: 'POST', body: JSON.stringify({ token: cache.token, text }) }),
+    sendGroup:   (gid, text, replyTo) => jfetch('/api/doi/groups/' + q(gid) + '/messages', { method: 'POST', body: JSON.stringify({ token: cache.token, text, ...(replyTo ? { replyTo } : {}) }) }),
     groupInvite: (gid, callsign) => jfetch('/api/doi/groups/' + q(gid) + '/invite',  { method: 'POST', body: JSON.stringify({ token: cache.token, callsign }) }),
     groupRemove: (gid, callsign) => jfetch('/api/doi/groups/' + q(gid) + '/remove',  { method: 'POST', body: JSON.stringify({ token: cache.token, callsign }) }),
     groupLeave:  (gid) => jfetch('/api/doi/groups/' + q(gid) + '/leave',   { method: 'POST', body: JSON.stringify({ token: cache.token }) }),
@@ -284,6 +285,7 @@
         const key = state.server + ':' + state.channel;
         const since = cache.chatSince[key] || 0;
         const r = await api.chat(state.server, state.channel, since);
+        updateTypingBar(r.typing);
         if (r.messages && r.messages.length) {
           const prev = cache.chat[key] || [];
           cache.chat[key] = since ? [...prev, ...r.messages] : r.messages;
@@ -296,20 +298,24 @@
         const otherKey = state.dmWith;
         const since = cache.dmSince[otherKey] || 0;
         const r = await api.dm(otherKey, since);
+        updateTypingBar(r.typing);
         if (r.messages && r.messages.length) {
           const prev = cache.dmMessages[otherKey] || [];
           cache.dmMessages[otherKey] = since ? [...prev, ...r.messages] : r.messages;
           cache.dmSince[otherKey] = cache.dmMessages[otherKey][cache.dmMessages[otherKey].length - 1].ts;
+          markSeen('dm:' + otherKey, cache.dmSince[otherKey]);
           rerenderMainSoft();
         }
       } else if (state.server === 'home' && state.homeView === 'group' && state.groupWith) {
         const gid = state.groupWith;
         const since = cache.groupSince[gid] || 0;
         const r = await api.groupMsgs(gid, since);
+        updateTypingBar(r.typing);
         if (r.messages && r.messages.length) {
           const prev = cache.groupMessages[gid] || [];
           cache.groupMessages[gid] = since ? [...prev, ...r.messages] : r.messages;
           cache.groupSince[gid] = cache.groupMessages[gid][cache.groupMessages[gid].length - 1].ts;
+          markSeen('grp:' + gid, cache.groupSince[gid]);
           rerenderMainSoft();
         }
       }
@@ -433,6 +439,7 @@
       <div class="doi-rail">
         <div class="doi-rail-item ${state.server === 'home' ? 'active' : ''}" title="Home · Friends" data-shell-nav="home">
           <img src="${LOGO_URL}" alt="Home" class="doi-rail-logo"/>
+          ${unreadCount() ? `<span class="doi-rail-badge">${unreadCount()}</span>` : ''}
         </div>
         <div class="doi-rail-sep"></div>
         ${servers.map(s => `
@@ -557,9 +564,12 @@
   }
   function convoRow(c) {
     const title = convoTitle(c);
+    const unread = isUnread(c);
+    const unreadDot = unread ? '<span class="doi-unreaddot" title="New messages"></span>' : '';
     if (c.kind === 'group') {
       const active = state.homeView === 'group' && state.groupWith === c.id;
-      return `<div class="doi-dm-row ${active?'active':''}" data-shell-nav="group" data-gid="${esc(c.id)}" data-title="${esc(title.toLowerCase())}">
+      return `<div class="doi-dm-row ${active?'active':''} ${unread?'unread':''}" data-shell-nav="group" data-gid="${esc(c.id)}" data-title="${esc(title.toLowerCase())}">
+        ${unreadDot}
         ${groupIconHTML(c, 32)}
         <div class="doi-dm-info">
           <div class="doi-dm-name">${esc(title)}</div>
@@ -571,12 +581,14 @@
     const other = c.other || {};
     const active = state.homeView === 'dm' && state.dmWith === other.key;
     const np = nameplateBits(other);
-    return `<div class="doi-dm-row ${active?'active':''} ${np.cls}" data-shell-nav="dm" data-dm-key="${esc(other.key)}" data-title="${esc((other.name||'').toLowerCase())}">
+    return `<div class="doi-dm-row ${active?'active':''} ${unread?'unread':''} ${np.cls}" data-shell-nav="dm" data-dm-key="${esc(other.key)}" data-title="${esc((other.name||'').toLowerCase())}">
       ${np.html}
-      ${avatarHTML(other.name, other.avatar, 32)}
+      ${unreadDot}
+      ${avatarWithStatus(other, 32)}
       <div class="doi-dm-info">
         <div class="doi-dm-name">${esc(other.name)}</div>
-        ${c.lastText ? `<div class="doi-dm-last">${esc(c.lastText.slice(0, 34))}</div>` : ''}
+        ${other.customStatus ? `<div class="doi-dm-last">${esc(other.customStatus.slice(0, 34))}</div>`
+          : c.lastText ? `<div class="doi-dm-last">${esc(c.lastText.slice(0, 34))}</div>` : ''}
       </div>
       <button class="doi-dm-close" data-dm-close="${esc(other.key)}" title="Close DM">×</button>
     </div>`;
@@ -585,10 +597,10 @@
   function userPanel(p) {
     return `<div class="doi-userpanel">
       <div class="doi-uleft" data-shell-minipopup title="Show profile">
-        ${avatarHTML(p.name, p.avatar, 36)}
+        ${avatarWithStatus(p, 36)}
         <div class="doi-uinfo">
           <div class="doi-uname">${esc(p.name)}${p.isDOI ? ' <span class="doi-badge-owner">OWNER</span>':''}</div>
-          <div class="doi-utag doi-online-dot">Online</div>
+          <div class="doi-utag">${esc(p.customStatus || statusOf(p).label)}</div>
         </div>
       </div>
       <div class="doi-uctrls">
@@ -707,10 +719,10 @@
     const np = nameplateBits(f);
     return `<div class="doi-friend ${np.cls}" data-open-profile="${esc(f.key || (f.name||'').toLowerCase())}">
       ${np.html}
-      ${avatarHTML(f.name, f.avatar, 40)}
+      ${avatarWithStatus(f, 40)}
       <div class="doi-friend-info">
         <div class="doi-friend-name">${esc(f.name)}</div>
-        <div class="doi-friend-tag">${esc(f.tag || '')} · ${esc(f.bio || 'Insurgent')}</div>
+        <div class="doi-friend-tag">${f.customStatus ? esc(f.customStatus) : `${esc(statusOf(f).label)} · ${esc(f.bio || 'Insurgent')}`}</div>
       </div>
       <div class="doi-friend-actions">
         <button class="doi-friend-msg" data-dm-open="${esc(f.key || (f.name||'').toLowerCase())}" title="Message">
@@ -775,8 +787,12 @@
   }
 
   function msgActions(mine) {
-    if (!mine) return '';
+    const reply = `<button class="doi-msg-act" data-msg-reply title="Reply">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+      </button>`;
+    if (!mine) return `<div class="doi-msg-actions">${reply}</div>`;
     return `<div class="doi-msg-actions">
+      ${reply}
       <button class="doi-msg-act" data-msg-edit title="Edit">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
       </button>
@@ -792,6 +808,7 @@
       id: m.id, ts: m.ts, text: m.text, edited: m.edited || 0,
       name: m.author || m.from || '?',
       key:  m.authorKey || m.fromKey || null,
+      replyTo: m.replyTo || null,
     };
   }
   const GROUP_GAP = 7 * 60_000; // messages from same author within 7 min collapse
@@ -816,26 +833,34 @@
         html += `<div class="doi-date-divider"><span>${esc(fmtDivider(m.ts))}</span></div>`;
         prev = null; // date change always starts a new group
       }
-      const grouped = prev && prev.name === m.name && (m.ts - prev.ts) < GROUP_GAP;
+      // replies always restart a group so the reference line has a header row
+      const grouped = prev && prev.name === m.name && (m.ts - prev.ts) < GROUP_GAP && !m.replyTo;
+      const txt = renderMsgText(m.text);
+      const mentionCls = txt.me && !mine ? 'mentioned' : '';
       if (grouped) {
-        html += `<div class="doi-msg doi-msg-compact" data-mid="${esc(m.id)}" data-mine="${mine?'1':''}">
+        html += `<div class="doi-msg doi-msg-compact ${mentionCls}" data-mid="${esc(m.id)}" data-mine="${mine?'1':''}">
           <span class="doi-msg-gutter">${esc(clock(m.ts))}</span>
           <div class="doi-msg-body">
-            <div class="doi-msg-text">${esc(m.text)}${m.edited ? ' <span class="doi-msg-edited">(edited)</span>':''}</div>
+            <div class="doi-msg-text">${txt.html}${m.edited ? ' <span class="doi-msg-edited">(edited)</span>':''}</div>
           </div>
           ${msgActions(mine)}
         </div>`;
       } else {
         const kp = knownProfile(m.key, m.name);
         const pkey = m.key || (m.name || '').toLowerCase();
-        html += `<div class="doi-msg doi-msg-head-row" data-mid="${esc(m.id)}" data-mine="${mine?'1':''}">
+        const replyRef = m.replyTo ? `<div class="doi-msg-replyref" data-jump="${esc(m.replyTo.id)}">
+            <span class="doi-msg-replyspine"></span>
+            <b>@${esc(m.replyTo.author)}</b><span class="doi-msg-replysnip">${esc(m.replyTo.text)}</span>
+          </div>` : '';
+        html += `<div class="doi-msg doi-msg-head-row ${mentionCls}" data-mid="${esc(m.id)}" data-mine="${mine?'1':''}">
+          ${replyRef}
           <span class="doi-msg-avawrap" data-open-profile="${esc(pkey)}" title="View profile">${avatarHTML(m.name, kp && kp.avatar, 40)}</span>
           <div class="doi-msg-body">
             <div class="doi-msg-head">
               <span class="doi-msg-name ${isOfficer?'doi-officer':''}" data-open-profile="${esc(pkey)}">${esc(m.name)}</span>
               <span class="doi-msg-time">${esc(fmtStamp(m.ts))}${m.edited ? ' <span class="doi-msg-edited">(edited)</span>':''}</span>
             </div>
-            <div class="doi-msg-text">${esc(m.text)}</div>
+            <div class="doi-msg-text">${txt.html}</div>
           </div>
           ${msgActions(mine)}
         </div>`;
@@ -866,7 +891,15 @@
     const placeholder = groupId ? 'Message ' + esc(label || 'group')
       : isDM ? 'Message @' + esc(label || '')
       : 'Message #' + esc(label || 'channel');
+    const reply = state.replyTo ? `
+      <div class="doi-reply-chip">
+        <span>Replying to <b>@${esc(state.replyTo.author)}</b></span>
+        <span class="doi-reply-snip">${esc(state.replyTo.text)}</span>
+        <button type="button" class="doi-reply-x" data-reply-cancel title="Cancel reply">×</button>
+      </div>` : '';
     return `<div class="doi-composer">
+      <div class="doi-typingbar" id="doiTypingBar"></div>
+      ${reply}
       <form data-composer data-dm="${isDM ? '1':''}" data-gid="${groupId ? esc(groupId) : ''}">
         <button type="button" class="doi-composer-plus" data-shell-soft="Attachments" title="Upload">+</button>
         <input type="text" placeholder="${placeholder}" maxlength="2000" autocomplete="off"/>
@@ -1046,13 +1079,14 @@
             <div class="doi-pp-banner ${isSelf?'editable':''}" data-pp-editbanner style="background:${esc(prof.bannerColor)}"></div>
             <div class="doi-pp-avatarwrap" style="position:relative">${avatarHTML(prof.name, prof.avatar, 96)}
               ${decoOverlayHTML(decoIt)}
-              <span class="doi-pp-online"></span>
+              <span class="doi-pp-online" style="background:${statusOf(prof).color}" title="${esc(statusOf(prof).label)}"></span>
             </div>
             <div class="doi-pp-body">
               <div class="doi-pp-namebox ${plateIt?'has-plate':''}">
                 ${plateCss ? `<span class="doi-pp-nameplate" style="${plateCss}"></span>` : ''}
                 <h2 class="doi-pp-name">${esc(prof.name)}${prof.isDOI ? ' <span class="doi-badge-owner">OWNER</span>':''}</h2>
                 <div class="doi-pp-sub">${esc(prof.tag)} ${prof.pronouns ? '· ' + esc(prof.pronouns) : ''}</div>
+                ${prof.customStatus ? `<div class="doi-pp-customstatus">${esc(prof.customStatus)}</div>` : ''}
               </div>
               <div class="doi-pp-actions">${actions}</div>
               <div class="doi-pp-sec">About Me</div>
@@ -1298,10 +1332,21 @@
               <span class="doi-mini-chev">›</span>
             </button>
             <button class="doi-mini-row" data-mini-status>
-              <span class="doi-mini-statusdot"></span>
-              <span>Online</span>
+              <span class="doi-mini-statusdot" style="background:${statusOf(p).color}"></span>
+              <span>${esc(statusOf(p).label)}</span>
               <span class="doi-mini-chev">›</span>
             </button>
+            <div class="doi-mini-statusmenu" data-mini-statusmenu hidden>
+              ${Object.keys(STATUS_META).map(k => `
+                <button class="doi-mini-row doi-mini-statusopt ${((p.status||'online')===k)?'active':''}" data-set-status="${k}">
+                  <span class="doi-mini-statusdot" style="background:${STATUS_META[k].color}"></span>
+                  <span>${STATUS_META[k].label}</span>
+                </button>`).join('')}
+              <div class="doi-mini-customstatus">
+                <input id="doiCustomStatus" maxlength="60" placeholder="Set a custom status…" value="${esc(p.customStatus||'')}"/>
+                <button class="doi-mini-statussave" data-save-status>Save</button>
+              </div>
+            </div>
           </div>
           <div class="doi-mini-list">
             <button class="doi-mini-row" data-mini-signout>
@@ -1320,7 +1365,25 @@
     anchor.querySelector('[data-mini-close]').addEventListener('click', close);
     anchor.querySelector('[data-mini-editprofile]').addEventListener('click', () => { close(); openSettings('profile'); });
     anchor.querySelector('[data-mini-viewbio]')?.addEventListener('click', () => { close(); openProfilePopup(p.key); });
-    anchor.querySelector('[data-mini-status]').addEventListener('click', () => { /* status placeholder */ });
+    anchor.querySelector('[data-mini-status]').addEventListener('click', () => {
+      const menu = anchor.querySelector('[data-mini-statusmenu]');
+      if (menu) menu.hidden = !menu.hidden;
+    });
+    $$('[data-set-status]', anchor).forEach(b => b.addEventListener('click', async () => {
+      try {
+        const r = await api.saveProfile({ status: b.dataset.setStatus });
+        cache.profile = r.profile;
+        close(); rerenderShell();
+      } catch (e) { toast('Failed: ' + e.message); }
+    }));
+    anchor.querySelector('[data-save-status]')?.addEventListener('click', async () => {
+      const inp = anchor.querySelector('#doiCustomStatus');
+      try {
+        const r = await api.saveProfile({ customStatus: (inp && inp.value) || '' });
+        cache.profile = r.profile;
+        close(); rerenderShell();
+      } catch (e) { toast('Failed: ' + e.message); }
+    });
     anchor.querySelector('[data-mini-signout]').addEventListener('click', () => { close(); signOut(); });
     anchor.querySelector('[data-mini-copyid]').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(p.key || ''); } catch (_) {}
@@ -1916,6 +1979,82 @@
     try { cache.shop = await api.shop(); } catch (_) {}
   }
 
+  /* ---------- PRESENCE / STATUS ---------- */
+  const STATUS_META = {
+    online:    { color: '#23a55a', label: 'Online' },
+    idle:      { color: '#f0b232', label: 'Idle' },
+    dnd:       { color: '#f23f42', label: 'Do Not Disturb' },
+    invisible: { color: '#80848e', label: 'Invisible' },
+  };
+  function statusOf(prof) { return STATUS_META[(prof && prof.status) || 'online'] || STATUS_META.online; }
+  // Avatar wrapped with a Discord-style status dot in the corner.
+  function avatarWithStatus(prof, size) {
+    const st = statusOf(prof);
+    const shown = (prof && prof.status) === 'invisible' ? STATUS_META.invisible : st;
+    return `<span class="doi-avstack">${avatarHTML(prof.name, prof.avatar, size)}<i class="doi-sdot" style="background:${shown.color}"></i></span>`;
+  }
+
+  /* ---------- UNREAD TRACKING (client-side, per browser) ---------- */
+  const SEEN_KEY = 'doi.seen';
+  let seenMap = {};
+  try { seenMap = JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') || {}; } catch (_) {}
+  function markSeen(convoKey, ts) {
+    seenMap[convoKey] = Math.max(seenMap[convoKey] || 0, ts || Date.now());
+    try { localStorage.setItem(SEEN_KEY, JSON.stringify(seenMap)); } catch (_) {}
+  }
+  function convoKeyOf(c) { return c.kind === 'group' ? 'grp:' + c.id : 'dm:' + ((c.other && c.other.key) || ''); }
+  function isUnread(c) {
+    if (!c.lastTs) return false;
+    const key = convoKeyOf(c);
+    // never unread while you're looking at it
+    if (state.homeView === 'dm' && c.other && state.dmWith === c.other.key) return false;
+    if (state.homeView === 'group' && state.groupWith === c.id) return false;
+    return c.lastTs > (seenMap[key] || 0);
+  }
+  function unreadCount() { return (cache.dms || []).filter(isUnread).length; }
+
+  /* ---------- TYPING INDICATOR ---------- */
+  function dmPairKeyClient(a, b) { return a < b ? a + '|' + b : b + '|' + a; }
+  function typingTargetForView() {
+    if (state.server !== 'home' && state.channel) return `srv:${state.server}:${state.channel}`;
+    if (state.server === 'home' && state.homeView === 'dm' && state.dmWith && cache.profile)
+      return `dm:${dmPairKeyClient(cache.profile.key, state.dmWith)}`;
+    if (state.server === 'home' && state.homeView === 'group' && state.groupWith)
+      return `grp:${state.groupWith}`;
+    return null;
+  }
+  let lastTypingSent = 0;
+  function sendTypingThrottled() {
+    const now = Date.now();
+    if (now - lastTypingSent < 2500) return;
+    lastTypingSent = now;
+    const target = typingTargetForView();
+    if (target) api.typing(target).catch(() => {});
+  }
+  // Update the "X is typing…" bar in place (no re-render, keeps focus).
+  function updateTypingBar(names) {
+    cache.typers = names || [];
+    const bar = document.getElementById('doiTypingBar');
+    if (!bar) return;
+    if (!cache.typers.length) { bar.innerHTML = ''; bar.classList.remove('on'); return; }
+    const who = cache.typers.length > 3 ? 'Several people' : cache.typers.map(esc).join(', ');
+    bar.innerHTML = `<span class="doi-typing-dots"><b></b><b></b><b></b></span> <b>${who}</b> ${cache.typers.length === 1 ? 'is' : 'are'} typing…`;
+    bar.classList.add('on');
+  }
+
+  /* ---------- MENTIONS ---------- */
+  // Render escaped message text with @mention pills. Returns { html, me }.
+  function renderMsgText(text) {
+    const myName = (cache.profile && cache.profile.name) || '';
+    let me = false;
+    const html = esc(text).replace(/@([A-Za-z0-9_]{3,16})/g, (full, name) => {
+      const isMe = myName && name.toLowerCase() === myName.toLowerCase();
+      if (isMe) me = true;
+      return `<span class="doi-mention ${isMe ? 'me' : ''}" data-open-profile="${esc(name.toLowerCase())}">@${esc(name)}</span>`;
+    });
+    return { html, me };
+  }
+
   /* ---------- SETTINGS MODAL ---------- */
   function openSettings(section = 'account') {
     const modal = document.getElementById('doiUserSettings');
@@ -2329,6 +2468,7 @@
     if (form && !form.dataset.wired) {
       form.dataset.wired = '1';
       const inputEl = form.querySelector('input');
+      if (inputEl) inputEl.addEventListener('input', () => { if (inputEl.value) sendTypingThrottled(); });
       if (inputEl) inputEl.addEventListener('keydown', ev => {
         if (ev.key !== 'ArrowUp' || inputEl.value.trim()) return;
         // find my last message and trigger its edit affordance
@@ -2356,37 +2496,41 @@
         const text = input.value.trim();
         if (!text) return;
         input.disabled = true;
+        const replyId = state.replyTo && state.replyTo.id;
         try {
           const gid = form.dataset.gid;
           if (gid) {
-            const r = await api.sendGroup(gid, text);
+            const r = await api.sendGroup(gid, text, replyId);
             const list = cache.groupMessages[gid] || (cache.groupMessages[gid] = []);
             list.push(r.message);
             cache.groupSince[gid] = r.message.ts;
             input.value = '';
+            state.replyTo = null;
             bumpConvo('group', gid, r.message.text, r.message.ts);
             rerenderShellKeepComposer();
           } else if (form.dataset.dm) {
             const otherKey = state.dmWith;
             if (!otherKey) return;
             const wasNew = !(cache.dms || []).some(c => c.kind !== 'group' && c.other && c.other.key === otherKey);
-            const r = await api.sendDM(otherKey, text);
+            const r = await api.sendDM(otherKey, text, replyId);
             const list = cache.dmMessages[otherKey] || (cache.dmMessages[otherKey] = []);
             list.push(r.message);
             cache.dmSince[otherKey] = r.message.ts;
             input.value = '';
+            state.replyTo = null;
             ensureConvoInList('dm', otherKey);
             bumpConvo('dm', otherKey, r.message.text, r.message.ts);
             // new conversation needs the sidebar rebuilt; otherwise soft-render main
             if (wasNew) rerenderShellKeepComposer(); else rerenderMainSoft();
           } else {
             if (state.server === 'home' || !state.channel) return;
-            const r = await api.sendChat(state.server, state.channel, text);
+            const r = await api.sendChat(state.server, state.channel, text, replyId);
             const key = state.server + ':' + state.channel;
             const list = cache.chat[key] || (cache.chat[key] = []);
             list.push(r.message);
             cache.chatSince[key] = r.message.ts;
             input.value = '';
+            state.replyTo = null;
             rerenderMainSoft();
           }
         } catch (e2) {
@@ -2447,6 +2591,32 @@
       });
     });
     // open profile popup
+    // reply: pick a message → chip above the composer; send attaches the reference
+    $$('[data-msg-reply]', container).forEach(b => b.addEventListener('click', () => {
+      const row = b.closest('.doi-msg');
+      if (!row) return;
+      const mid = row.dataset.mid;
+      const ctx = msgCtx();
+      const m = (ctx.list() || []).find(x => x.id === mid);
+      if (!m) return;
+      state.replyTo = { id: m.id, author: m.author || m.from || '?', text: String(m.text || '').slice(0, 90) };
+      rerenderMainSoft();
+      const inp = container.querySelector('.doi-composer input');
+      if (inp) inp.focus();
+    }));
+    $$('[data-reply-cancel]', container).forEach(b => b.addEventListener('click', () => {
+      state.replyTo = null;
+      rerenderMainSoft();
+    }));
+    // click a reply reference → jump to the original message and flash it
+    $$('[data-jump]', container).forEach(el => el.addEventListener('click', () => {
+      const t = container.querySelector('.doi-msg[data-mid="' + el.dataset.jump.replace(/"/g, '\\"') + '"]');
+      if (!t) return;
+      t.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      t.classList.add('doi-msg-flash');
+      setTimeout(() => t.classList.remove('doi-msg-flash'), 1600);
+    }));
+
     $$('[data-open-profile]', container).forEach(el => {
       if (el.dataset.wired) return; el.dataset.wired = '1';
       el.addEventListener('click', e => {
@@ -2524,6 +2694,7 @@
     // navigation: home | server | channel | home-friends | dm
     $$('[data-shell-nav]', container).forEach(el => el.addEventListener('click', async () => {
       const t = el.dataset.shellNav;
+      state.replyTo = null; cache.typers = [];
       if (t === 'home') {
         state.server = 'home'; state.channel = null; state.homeView = 'friends';
         await Promise.all([loadFriends(), loadFriendRequests(), loadDMs()]);
@@ -2534,10 +2705,12 @@
       else if (t === 'dm') {
         state.homeView = 'dm'; state.dmWith = el.dataset.dmKey; state.groupWith = null;
         await loadDMMessages(state.dmWith);
+        markSeen('dm:' + state.dmWith);
       }
       else if (t === 'group') {
         state.homeView = 'group'; state.groupWith = el.dataset.gid; state.dmWith = null;
         await loadGroup(state.groupWith);
+        markSeen('grp:' + state.groupWith);
       }
       else if (t === 'server') {
         state.server = el.dataset.sid; state.channel = null;

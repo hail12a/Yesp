@@ -242,6 +242,29 @@ function saveDoi() {
 const DOI_MSG_CAP    = 300;         // messages per channel
 const DOI_SRV_CAP    = 100;         // servers per user
 
+// Transient typing indicators (never persisted): target -> { userKey: { name, ts } }
+// Targets: "srv:<sid>:<cid>" | "dm:<pairKey>" | "grp:<gid>"
+const doiTyping = {};
+const TYPING_TTL = 6000;
+function typersFor(target, excludeKey) {
+  const t = doiTyping[target];
+  if (!t) return [];
+  const now = Date.now();
+  const out = [];
+  for (const k of Object.keys(t)) {
+    if (now - t[k].ts > TYPING_TTL) { delete t[k]; continue; }
+    if (k !== excludeKey) out.push(t[k].name);
+  }
+  return out;
+}
+// Snapshot a referenced message for Discord-style replies.
+function replySnapshot(list, id) {
+  if (!id) return undefined;
+  const ref = (list || []).find(x => x.id === id);
+  if (!ref) return undefined;
+  return { id: ref.id, author: ref.author || ref.from || "?", text: String(ref.text || "").slice(0, 90) };
+}
+
 function doiUserFromToken(t) {
   const k = userFromToken(t);
   if (!k) return null;
@@ -260,6 +283,8 @@ function doiProfile(key) {
     avatar: p.avatar || null,
     bannerColor: p.bannerColor || defaultBanner(key),
     messagePrivacy: p.messagePrivacy || "anyone",   // "anyone" | "friends"
+    status: p.status || "online",                   // online | idle | dnd | invisible
+    customStatus: p.customStatus || "",             // short free-text status line
     theme: p.theme || "midnight",                   // "midnight" (liquid glass, default) | "discord" | "insurgency" (owner-only)
     accent: p.accent || doiStore.siteAccent || "#5865f2",  // per-user accent; falls back to owner-set site default
     siteAccent: doiStore.siteAccent || "",          // owner-pushed default (for the Appearance toggle state)
@@ -560,6 +585,8 @@ async function handleApi(req, res, urlPath, query) {
     if (typeof m.accent === "string" && /^#[0-9a-fA-F]{6}$/.test(m.accent)) p.accent = m.accent;
     if (typeof m.accentReset !== "undefined" && m.accentReset) delete p.accent;
     if (typeof m.bubbles === "boolean") p.bubbles = m.bubbles;
+    if (["online", "idle", "dnd", "invisible"].includes(m.status)) p.status = m.status;
+    if (typeof m.customStatus === "string") p.customStatus = m.customStatus.slice(0, 60);
     // Owner can push a site-wide default accent to every user (like the theme toggle).
     if (u.name === "DOI" && typeof m.siteAccent === "string") {
       doiStore.siteAccent = /^#[0-9a-fA-F]{6}$/.test(m.siteAccent) ? m.siteAccent : "";
@@ -597,6 +624,18 @@ async function handleApi(req, res, urlPath, query) {
     saveDoi();
     return sendJSON(res, { ok: true, items: doiStore.shop.items });
   }
+  // ---------- TYPING (transient; polled back on message GETs) ----------
+  if (urlPath === "/api/doi/typing" && req.method === "POST") {
+    const m = await readBody(req);
+    const u = doiUserFromToken(m.token);
+    if (!u) return sendJSON(res, { error: "Not logged in" }, 401);
+    const target = String(m.target || "").slice(0, 120);
+    if (!/^(srv:[^:]+:[^:]+|dm:[^:]+|grp:[^:]+)$/.test(target)) return sendJSON(res, { error: "bad target" }, 400);
+    doiTyping[target] = doiTyping[target] || {};
+    doiTyping[target][u.key] = { name: u.name, ts: Date.now() };
+    return sendJSON(res, { ok: true });
+  }
+
   if (urlPath === "/api/doi/shop/claim" && req.method === "POST") {
     const m = await readBody(req);
     const u = doiUserFromToken(m.token);
@@ -874,7 +913,7 @@ async function handleApi(req, res, urlPath, query) {
         const since = parseInt(query.get("since") || "0", 10) || 0;
         const all = (s.chat && s.chat[cid]) || [];
         const msgs = since ? all.filter(x => x.ts > since) : all;
-        return sendJSON(res, { ok: true, messages: msgs, now: Date.now() });
+        return sendJSON(res, { ok: true, messages: msgs, now: Date.now(), typing: typersFor(`srv:${s.id}:${cid}`, u.key) });
       }
       if (req.method === "POST") {
         const m = await readBody(req);
@@ -884,7 +923,8 @@ async function handleApi(req, res, urlPath, query) {
         const text = String(m.text || "").trim().slice(0, 2000);
         if (!text) return sendJSON(res, { error: "empty message" }, 400);
         s.chat = s.chat || {}; s.chat[cid] = s.chat[cid] || [];
-        const post = { id: "c-" + crypto.randomBytes(5).toString("hex"), author: u.name, authorKey: u.key, ts: Date.now(), text };
+        const replyTo = replySnapshot(s.chat[cid], m.replyTo);
+        const post = { id: "c-" + crypto.randomBytes(5).toString("hex"), author: u.name, authorKey: u.key, ts: Date.now(), text, ...(replyTo ? { replyTo } : {}) };
         s.chat[cid].push(post);
         if (s.chat[cid].length > DOI_MSG_CAP) s.chat[cid].splice(0, s.chat[cid].length - DOI_MSG_CAP);
         saveDoi();
@@ -1099,7 +1139,7 @@ async function handleApi(req, res, urlPath, query) {
         const since = parseInt(query.get("since") || "0", 10) || 0;
         const all = g.messages || [];
         const msgs = since ? all.filter(x => x.ts > since) : all;
-        return sendJSON(res, { ok: true, messages: msgs, now: Date.now() });
+        return sendJSON(res, { ok: true, messages: msgs, now: Date.now(), typing: typersFor(`grp:${g.id}`, u.key) });
       }
       if (req.method === "POST") {
         const m = await readBody(req);
@@ -1108,7 +1148,8 @@ async function handleApi(req, res, urlPath, query) {
         if (!groupHasMember(g, u.key)) return sendJSON(res, { error: "not a member" }, 403);
         const text = String(m.text || "").trim().slice(0, 2000);
         if (!text) return sendJSON(res, { error: "empty message" }, 400);
-        const post = { id: "g-" + crypto.randomBytes(5).toString("hex"), from: u.name, fromKey: u.key, ts: Date.now(), text };
+        const replyTo = replySnapshot(g.messages, m.replyTo);
+        const post = { id: "g-" + crypto.randomBytes(5).toString("hex"), from: u.name, fromKey: u.key, ts: Date.now(), text, ...(replyTo ? { replyTo } : {}) };
         g.messages.push(post);
         if (g.messages.length > DOI_MSG_CAP) g.messages.splice(0, g.messages.length - DOI_MSG_CAP);
         saveDoi();
@@ -1206,7 +1247,7 @@ async function handleApi(req, res, urlPath, query) {
       const since = parseInt(query.get("since") || "0", 10) || 0;
       const all = doiStore.dms[pk] || [];
       const msgs = since ? all.filter(x => x.ts > since) : all;
-      return sendJSON(res, { ok: true, other: doiProfile(otherKey), messages: msgs, now: Date.now() });
+      return sendJSON(res, { ok: true, other: doiProfile(otherKey), messages: msgs, now: Date.now(), typing: typersFor(`dm:${pk}`, u.key) });
     }
     if (mm && req.method === "POST") {
       const m = await readBody(req);
@@ -1223,7 +1264,8 @@ async function handleApi(req, res, urlPath, query) {
       if (!text) return sendJSON(res, { error: "empty message" }, 400);
       const pk = dmPairKey(u.key, otherKey);
       doiStore.dms[pk] = doiStore.dms[pk] || [];
-      const post = { id: "d-" + crypto.randomBytes(5).toString("hex"), from: u.name, fromKey: u.key, ts: Date.now(), text };
+      const replyTo = replySnapshot(doiStore.dms[pk], m.replyTo);
+      const post = { id: "d-" + crypto.randomBytes(5).toString("hex"), from: u.name, fromKey: u.key, ts: Date.now(), text, ...(replyTo ? { replyTo } : {}) };
       doiStore.dms[pk].push(post);
       if (doiStore.dms[pk].length > DOI_MSG_CAP) doiStore.dms[pk].splice(0, doiStore.dms[pk].length - DOI_MSG_CAP);
       saveDoi();

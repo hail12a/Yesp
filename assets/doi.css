@@ -1953,3 +1953,115 @@ body.doi-theme-midnight .doi-shop-topstrip {
 .doi-shop-hero.v2 .doi-shop-eyebrow { color: rgba(255,255,255,.8); }
 .doi-shop-hero.v2 .doi-shop-hero-sub { color: rgba(255,255,255,.92); }
 .doi-shop-hero.v2 .doi-shop-hero-sub b { color: #ffd85e; }
+
+/* =========================================================
+   DISCORD-PARITY EXTRAS — typing indicator, replies,
+   @mentions, presence/status, unread badges.
+   ========================================================= */
+
+/* typing indicator above the composer */
+.doi-typingbar {
+  min-height: 0; padding: 0 6px; font-size: 12.5px; color: var(--doi-ink-3);
+  display: flex; align-items: center; gap: 7px; overflow: hidden;
+  max-height: 0; transition: max-height .18s var(--doi-ease-out), padding .18s var(--doi-ease-out);
+}
+.doi-typingbar.on { max-height: 24px; padding: 2px 6px 6px; }
+.doi-typing-dots { display: inline-flex; gap: 3px; align-items: center; }
+.doi-typing-dots b {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--doi-ink-3);
+  animation: doiTypingBounce 1.2s ease-in-out infinite;
+}
+.doi-typing-dots b:nth-child(2) { animation-delay: .15s; }
+.doi-typing-dots b:nth-child(3) { animation-delay: .3s; }
+@keyframes doiTypingBounce { 0%,60%,100% { transform: translateY(0); opacity: .5; } 30% { transform: translateY(-3px); opacity: 1; } }
+
+/* reply chip above the composer */
+.doi-reply-chip {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08);
+  border-bottom: none; border-radius: 10px 10px 0 0;
+  padding: 7px 12px; font-size: 12.5px; color: var(--doi-ink-3);
+  margin: 0 1px -1px;
+}
+.doi-reply-chip b { color: var(--doi-ink); }
+.doi-reply-snip { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--doi-ink-4); }
+.doi-reply-x {
+  background: none; border: none; color: var(--doi-ink-4); cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 0 2px;
+}
+.doi-reply-x:hover { color: #fff; }
+.doi-reply-chip + form { border-top-left-radius: 0 !important; border-top-right-radius: 0 !important; }
+
+/* reply reference line above a message (Discord's spine + snippet) */
+.doi-msg.doi-msg-head-row { flex-wrap: wrap; }
+.doi-msg-replyref {
+  flex: 0 0 100%; display: flex; align-items: center; gap: 6px;
+  padding: 0 0 3px 26px; position: relative; cursor: pointer;
+  font-size: 12.5px; color: var(--doi-ink-4);
+}
+.doi-msg-replyref b { color: var(--doi-ink-3); }
+.doi-msg-replyref:hover b { color: var(--doi-ink); }
+.doi-msg-replysnip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+.doi-msg-replyspine {
+  position: absolute; left: 18px; bottom: -2px; width: 16px; height: 12px;
+  border-left: 2px solid var(--doi-ink-dim); border-top: 2px solid var(--doi-ink-dim);
+  border-top-left-radius: 6px; opacity: .6;
+}
+.doi-msg-flash { background: color-mix(in srgb, var(--doi-accent) 18%, transparent) !important; transition: background .3s ease; }
+
+/* @mentions */
+.doi-mention {
+  background: color-mix(in srgb, var(--doi-accent) 24%, transparent);
+  color: color-mix(in srgb, var(--doi-accent) 60%, #fff);
+  border-radius: 4px; padding: 0 3px; font-weight: 600; cursor: pointer;
+  transition: background .12s ease;
+}
+.doi-mention:hover { background: color-mix(in srgb, var(--doi-accent) 45%, transparent); color: #fff; }
+.doi-msg.mentioned {
+  background: color-mix(in srgb, #f0b232 9%, transparent);
+  box-shadow: inset 2px 0 0 #f0b232;
+}
+.doi-msg.mentioned:hover { background: color-mix(in srgb, #f0b232 13%, transparent); }
+
+/* presence: status dot pinned to the avatar corner */
+.doi-avstack { position: relative; display: inline-block; flex: none; }
+.doi-avstack .doi-sdot {
+  position: absolute; right: -1px; bottom: -1px;
+  width: 11px; height: 11px; border-radius: 50%;
+  border: 2.5px solid var(--doi-panel); display: block;
+}
+body.doi-theme-midnight .doi-avstack .doi-sdot { border-color: #101018; }
+
+/* mini-popup status menu */
+.doi-mini-statusmenu { padding: 2px 0 4px; }
+.doi-mini-statusopt.active { background: rgba(255,255,255,.06); border-radius: 8px; }
+.doi-mini-statusdot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+.doi-mini-customstatus { display: flex; gap: 6px; padding: 6px 8px 2px; }
+.doi-mini-customstatus input {
+  flex: 1; min-width: 0; background: rgba(0,0,0,.3); color: var(--doi-ink);
+  border: 1px solid rgba(255,255,255,.09); border-radius: 8px;
+  padding: 7px 9px; font-family: var(--sans); font-size: 12.5px; outline: none;
+}
+.doi-mini-customstatus input:focus { border-color: var(--doi-accent); }
+.doi-mini-statussave {
+  background: var(--doi-accent); border: none; color: #fff; border-radius: 8px;
+  padding: 0 12px; font-family: var(--sans); font-weight: 700; font-size: 12px; cursor: pointer;
+}
+.doi-mini-statussave:hover { background: var(--doi-accent-2); }
+
+/* unread: white pill dot on the row + bold name; count badge on the Home rail */
+.doi-dm-row .doi-unreaddot {
+  position: absolute; left: -8px; top: 50%; transform: translateY(-50%);
+  width: 4px; height: 8px; border-radius: 0 4px 4px 0; background: #fff;
+}
+.doi-dm-row.unread .doi-dm-name { color: #fff; font-weight: 700; }
+.doi-dm-row.unread .doi-dm-last { color: var(--doi-ink-2); }
+.doi-rail-badge {
+  position: absolute; right: -2px; bottom: -2px; z-index: 2;
+  min-width: 18px; height: 18px; border-radius: 9px; padding: 0 5px;
+  background: var(--doi-red); color: #fff; font-size: 11px; font-weight: 800;
+  display: grid; place-items: center;
+  border: 3px solid var(--doi-bg); box-sizing: content-box;
+}
+body.doi-theme-midnight .doi-rail-badge { border-color: #101018; }
+.doi-pp-customstatus { margin-top: 6px; font-size: 13.5px; color: var(--doi-ink-2); position: relative; z-index: 1; }
